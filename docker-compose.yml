@@ -22,7 +22,7 @@ services:
         max-file: "3"
 
   # ----------------------------------------------------------------------------
-  # 2. Next.js Web Application (Optional: run with --profile all or compose up web)
+  # 2. Next.js Web Application (Staging Dashboard on port 3015)
   # ----------------------------------------------------------------------------
   web:
     build:
@@ -51,6 +51,3 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
-    profiles:
-      - all
-      - web
