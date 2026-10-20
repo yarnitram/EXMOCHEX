@@ -32,6 +32,9 @@ services:
     restart: unless-stopped
     ports:
       - "${WEB_PORT:-3015}:3015"
+    environment:
+      - PORT=3015
+      - HOSTNAME=0.0.0.0
     env_file:
       - .env.local
     logging:
