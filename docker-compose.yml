@@ -31,7 +31,7 @@ services:
     container_name: exmochex-web
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "${WEB_PORT:-3015}:3015"
     env_file:
       - .env.local
     logging:
