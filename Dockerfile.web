@@ -5,14 +5,16 @@ FROM node:20-alpine AS deps
 RUN apk add --no-cache libc6-compat
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci
+
+# Upgrade npm to prevent the Arborist 'edgesOut' lockfile resolution bug
+RUN npm install -g npm@latest && (npm ci --legacy-peer-deps || npm install --legacy-peer-deps)
 
 FROM node:20-alpine AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
-# Environment variables for build time (dummy if not passed; runtime reads from env)
+# Environment variables for Next.js static asset compilation
 ARG NEXT_PUBLIC_SUPABASE_URL
 ARG NEXT_PUBLIC_SUPABASE_ANON_KEY
 ENV NEXT_PUBLIC_SUPABASE_URL=$NEXT_PUBLIC_SUPABASE_URL
