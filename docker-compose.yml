@@ -1,0 +1,41 @@
+services:
+  # ----------------------------------------------------------------------------
+  # 1. 24/7 Background Alert Watcher (Telegram, Discord, In-App Notifications)
+  # ----------------------------------------------------------------------------
+  watcher:
+    build:
+      context: .
+      dockerfile: Dockerfile.watcher
+    container_name: exmochex-watcher
+    restart: unless-stopped
+    env_file:
+      - .env.local
+    environment:
+      - POLL_INTERVAL=2
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ----------------------------------------------------------------------------
+  # 2. Next.js Web Application (Optional: run with --profile all or compose up web)
+  # ----------------------------------------------------------------------------
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    container_name: exmochex-web
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env.local
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    profiles:
+      - all
+      - web

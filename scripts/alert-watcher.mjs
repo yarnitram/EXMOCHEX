@@ -1,35 +1,42 @@
 #!/usr/bin/env node
 /**
- * MOCHEX — Alert Watcher (always-on)
- * =================================
- * Polls the MEXC futures API, checks every saved watchlist coin against its
- * price trigger, and notifies the user (Discord + desktop) when a trigger
- * fires, including the saved trade plan (entry / stop-loss / take-profit).
+ * EXMOCHEX — Alert Watcher (Always-On Background Engine)
+ * ======================================================
+ * Polls MEXC futures API, evaluates active watchlist price triggers and open
+ * trade SL/TP targets, and dispatches real-time alerts across Discord,
+ * Telegram bot destinations, in-app notifications, and desktop toasts.
  *
- * Reads Supabase config from `.env.local` (service-role key).
- * Run:  node scripts/alert-watcher.mjs
- *       node scripts/alert-watcher.mjs --interval 10
+ * Reads Supabase config from `.env.local` (using authenticated service-role key).
+ * Run:  node scripts/alert-watcher.mjs --interval 2
  */
 import { readFileSync, existsSync } from "node:fs";
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-// ------------------------------------------------------------------ config
+// ------------------------------------------------------------------ Config
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
 const args = process.argv.slice(2);
 const intervalIdx = args.indexOf("--interval");
-const POLL_MS = (Number(args[intervalIdx + 1]) || 10) * 1000;
+const POLL_MS = (Number(args[intervalIdx + 1]) || 2) * 1000;
 
-// Load .env.local
+// Load .env.local if present, fallback to process.env
 const env = loadDotEnv(path.join(ROOT, ".env.local"));
-const SUPABASE_URL = env.NEXT_PUBLIC_SUPABASE_URL;
-const SERVICE_KEY = env.SUPABASE_SERVICE_ROLE_KEY;
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || env.NEXT_PUBLIC_SUPABASE_URL;
+const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_SERVICE_ROLE_KEY;
+const FALLBACK_DISCORD_WEBHOOK = process.env.DISCORD_WEBHOOK_URL || env.DISCORD_WEBHOOK_URL;
+const FALLBACK_TELEGRAM_BOT = process.env.TELEGRAM_BOT_TOKEN || env.TELEGRAM_BOT_TOKEN;
+const FALLBACK_TELEGRAM_CHAT = process.env.TELEGRAM_CHAT_ID || env.TELEGRAM_CHAT_ID;
+
+if (!SUPABASE_URL || !SERVICE_KEY) {
+  console.error("Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY in .env.local");
+  process.exit(1);
+}
 
 const MEXC_TICKER = "https://contract.mexc.com/api/v1/contract/ticker";
 
-// ------------------------------------------------------------------ helpers
+// ------------------------------------------------------------------ Helpers
 function loadDotEnv(file) {
   const out = {};
   try {
@@ -42,6 +49,13 @@ function loadDotEnv(file) {
   return out;
 }
 
+function escapeHtml(str) {
+  return String(str || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
 async function supabase(pathname, opts = {}) {
   const res = await fetch(`${SUPABASE_URL}${pathname}`, {
     ...opts,
@@ -52,31 +66,54 @@ async function supabase(pathname, opts = {}) {
       ...(opts.headers || {}),
     },
   });
-  if (!res.ok) throw new Error(`Supabase ${pathname} → ${res.status}`);
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`Supabase ${pathname} → ${res.status}: ${text}`);
+  }
   return res.json();
 }
 
 async function getLatestPrices() {
   const res = await fetch(MEXC_TICKER, {
-    signal: AbortSignal.timeout(20000),
+    signal: AbortSignal.timeout(10000),
   });
-  if (!res.ok) throw new Error(`MEXC ticker → ${res.status}`);
+  if (!res.ok) throw new Error(`MEXC ticker HTTP ${res.status}`);
   const json = await res.json();
-  if (!json.success) throw new Error("MEXC ticker failed");
+  if (!json.success || !Array.isArray(json.data)) throw new Error("MEXC ticker response invalid");
   const map = {};
-  for (const t of json.data) if (t.lastPrice > 0) map[t.symbol] = t.lastPrice;
+  for (const t of json.data) {
+    if (t.lastPrice > 0) map[t.symbol] = t.lastPrice;
+  }
   return map;
 }
 
-function fireDiscord(webhook, content) {
-  return fetch(webhook, {
+// ------------------------------------------------------------------ Notification Sinks
+function fireDiscord(webhookUrl, content) {
+  return fetch(webhookUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username: "MOCHEX", content }),
-  });
+    body: JSON.stringify({ username: "EXMOCHEX", content }),
+    signal: AbortSignal.timeout(8000),
+  }).catch((err) => console.error("Discord error:", err.message));
+}
+
+function fireTelegram(botToken, chatId, htmlText) {
+  const url = `https://api.telegram.org/bot${encodeURIComponent(botToken)}/sendMessage`;
+  return fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      chat_id: chatId,
+      text: htmlText,
+      parse_mode: "HTML",
+      disable_web_page_preview: false,
+    }),
+    signal: AbortSignal.timeout(8000),
+  }).catch((err) => console.error("Telegram error:", err.message));
 }
 
 function desktopNotify(title, body) {
+  if (process.platform !== "win32") return Promise.resolve();
   const ps = [
     "Add-Type -AssemblyName System.Windows.Forms;",
     "$n=New-Object System.Windows.Forms.NotifyIcon;",
@@ -97,19 +134,19 @@ function desktopNotify(title, body) {
   });
 }
 
-// ------------------------------------------------------------------ main
 function stamp() {
   return new Date().toLocaleTimeString();
 }
 
+// ------------------------------------------------------------------ Main Watcher Loop
 async function checkAll() {
   const [watchlist, settingsByUser] = await Promise.all([
     supabase(
-      "/rest/v1/watchlist_items?select=id,user_id,symbol,trigger_price,trigger_direction,entry_price,stop_loss,take_profit,order_type,notes,alert_fired"
+      "/rest/v1/watchlist_items?select=id,user_id,symbol,trigger_price,trigger_direction,entry_price,stop_loss,take_profit,order_type,notes,alert_fired,screenshot_url,screenshot_urls"
     ),
     (async () => {
       const rows = await supabase(
-        "/rest/v1/user_settings?select=user_id,discord_webhook_url,notify_discord,notify_desktop"
+        "/rest/v1/user_settings?select=user_id,discord_webhook_url,discord_webhooks,notify_discord,telegram_destinations,notify_telegram,notify_desktop"
       );
       const map = {};
       for (const r of rows) map[r.user_id] = r;
@@ -120,28 +157,24 @@ async function checkAll() {
   const activeItems = watchlist.filter(
     (i) => i.trigger_price != null && !i.alert_fired
   );
-  if (activeItems.length === 0) return;
 
   const prices = await getLatestPrices();
 
+  // 1. Process active watchlist triggers
   for (const item of activeItems) {
     const price = prices[item.symbol];
     if (price == null) continue;
     const trigger = Number(item.trigger_price);
-    // Direction-aware crossing check. The modal always infers a direction at
-    // save time; rows without one are skipped (consistent with the in-app
-    // poller) instead of firing on every poll.
+
     const hit =
       item.trigger_direction === "below"
         ? price <= trigger
         : item.trigger_direction === "above"
-          ? price >= trigger
-          : false;
+        ? price >= trigger
+        : false;
     if (!hit) continue;
 
-    // Claim the fire atomically: only update rows whose alert_fired is still
-    // false. An empty response means another watcher (browser poller or a
-    // second instance) already fired it — skip the notification entirely.
+    // Atomic claim so no duplicate fires occur
     let claimed = [];
     try {
       claimed = await supabase(
@@ -156,12 +189,12 @@ async function checkAll() {
         }
       );
     } catch (e) {
-      console.error("Claim-fired error:", e.message);
+      console.error("Claim error:", e.message);
     }
     if (!Array.isArray(claimed) || claimed.length === 0) continue;
 
     console.log(
-      `[${stamp()}] TRIGGER ${item.symbol} last=${price} trigger=${trigger}`
+      `[${stamp()}] 🚀 TRIGGER FIRED: ${item.symbol} | Mark: $${price} | Trigger: $${trigger}`
     );
 
     const isTriggerLimit = item.order_type === "trigger_limit";
@@ -171,7 +204,6 @@ async function checkAll() {
         : item.trigger_direction === "below";
 
     if (isTriggerLimit) {
-      // Trigger Limit: spawn new active watchlist item with trigger = EP, order_type = Limit
       if (item.entry_price != null) {
         const epDirection = isLong ? "below" : "above";
         try {
@@ -197,7 +229,6 @@ async function checkAll() {
         }
       }
     } else {
-      // Limit or Market: log to trade_alerts for the /trades page
       try {
         await supabase("/rest/v1/trade_alerts", {
           method: "POST",
@@ -220,11 +251,11 @@ async function checkAll() {
           headers: { Prefer: "return=minimal" },
         });
       } catch (e) {
-        console.error("Trade-log error:", e.message);
+        console.error("Trade-alert insert error:", e.message);
       }
     }
 
-    // Move original item to triggered_watchlist_items archive
+    // Move to triggered archive and remove from active
     try {
       await supabase("/rest/v1/triggered_watchlist_items", {
         method: "POST",
@@ -246,65 +277,75 @@ async function checkAll() {
         }),
         headers: { Prefer: "return=minimal" },
       });
-    } catch (e) {
-      // non-fatal if table unmigrated
-    }
+      await supabase(`/rest/v1/watchlist_items?id=eq.${item.id}`, { method: "DELETE" });
+    } catch {}
 
-    // Remove from active watchlist_items
-    try {
-      await supabase(`/rest/v1/watchlist_items?id=eq.${item.id}`, {
-        method: "DELETE",
-      });
-    } catch (e) {
-      console.error("Watchlist delete error:", e.message);
-    }
-
-    // Build notification content with the trade plan.
+    // In-app notification
+    const titleText = isTriggerLimit
+      ? `${item.symbol} Trigger Limit Hit — Limit armed at $${item.entry_price}`
+      : `${item.symbol} Alert Fired at $${price} (Trigger: $${trigger})`;
     const plan = [];
-    if (item.entry_price != null) plan.push(`**Entry:** ${item.entry_price}`);
-    if (item.stop_loss != null) plan.push(`**Stop:** ${item.stop_loss}`);
-    if (item.take_profit != null) plan.push(`**Target:** ${item.take_profit}`);
-    const planText = plan.length
-      ? `\nTrade plan (${isLong ? "LONG ↗" : "SHORT ↘"}) — ${plan.join(" · ")}`
-      : "";
+    if (item.entry_price != null) plan.push(`Entry: $${item.entry_price}`);
+    if (item.stop_loss != null) plan.push(`Stop: $${item.stop_loss}`);
+    if (item.take_profit != null) plan.push(`Target: $${item.take_profit}`);
+    const planText = plan.length ? `\nPlan (${isLong ? "LONG ↗" : "SHORT ↘"}): ${plan.join(" · ")}` : "";
+
+    try {
+      await supabase("/rest/v1/notifications", {
+        method: "POST",
+        body: JSON.stringify({
+          user_id: item.user_id,
+          type: "watchlist_trigger",
+          title: titleText,
+          message: `Price $${price} crossed trigger $${trigger}.${planText}`,
+          link: "/trades",
+          read: false,
+        }),
+        headers: { Prefer: "return=minimal" },
+      });
+    } catch {}
 
     const settings = settingsByUser[item.user_id];
-    const notifyTitle = isTriggerLimit
-      ? `🎯 **${item.symbol}** Trigger Limit hit — Limit armed at $${item.entry_price}`
-      : `📈 **${item.symbol}** hit **$${price}** (trigger $${trigger})`;
 
-    // Discord
-    if (settings?.notify_discord !== false && settings?.discord_webhook_url) {
-      await fireDiscord(
-        settings.discord_webhook_url,
-        `${notifyTitle}${planText}`
-      ).catch((e) => console.error("Discord error:", e.message));
+    // Discord fan-out
+    if (settings?.notify_discord !== false) {
+      let discordWebhooks = Array.isArray(settings?.discord_webhooks) && settings.discord_webhooks.length > 0
+        ? settings.discord_webhooks
+        : settings?.discord_webhook_url
+        ? [settings.discord_webhook_url]
+        : [];
+      if (discordWebhooks.length === 0 && FALLBACK_DISCORD_WEBHOOK) {
+        discordWebhooks = [FALLBACK_DISCORD_WEBHOOK];
+      }
+      for (const webhook of discordWebhooks) {
+        fireDiscord(webhook, `🔔 **${titleText}**\n${planText}`);
+      }
     }
 
-    // Desktop
+    // Telegram fan-out
+    if (settings?.notify_telegram !== false) {
+      let tgDests = Array.isArray(settings?.telegram_destinations) ? [...settings.telegram_destinations] : [];
+      if (tgDests.length === 0 && FALLBACK_TELEGRAM_BOT && FALLBACK_TELEGRAM_CHAT) {
+        tgDests = [{ bot_token: FALLBACK_TELEGRAM_BOT, chat_id: FALLBACK_TELEGRAM_CHAT }];
+      }
+      const tgMsg = `🔔 <b>${escapeHtml(titleText)}</b>\n<code>${escapeHtml(planText)}</code>`;
+      for (const dest of tgDests) {
+        if (dest && dest.bot_token && dest.chat_id) {
+          fireTelegram(dest.bot_token, dest.chat_id, tgMsg);
+        }
+      }
+    }
+
+    // Desktop notification
     if (settings?.notify_desktop !== false) {
-      await desktopNotify(
-        `${item.symbol} ${isTriggerLimit ? "TL Armed" : "Alert"}`,
-        `Price $${price} reached trigger $${trigger}.${plan.length ? `\n${plan.join(" · ")}` : ""}`
-      ).catch(() => {});
+      desktopNotify(item.symbol, `Mark $${price} hit trigger $${trigger}. ${plan.join(" ")}`);
     }
-
-    // Mark-fired already handled atomically above (claim step); nothing to do.
   }
 
+  // 2. Process open trade SL/TP target hits
   await checkSlTp(prices, settingsByUser);
 }
 
-/**
- * Check every logged trade plan for a stop-loss / take-profit hit.
- *
- * Runs alongside the watchlist scan so a hit is caught even when no browser
- * tab is open — the two share one price snapshot per poll.
- *
- * The level is claimed atomically (only while its `*_fired_at` is still null)
- * before anything is announced, so a level fires at most once no matter how
- * many pollers are running.
- */
 async function checkSlTp(prices, settingsByUser) {
   let rows;
   try {
@@ -312,7 +353,6 @@ async function checkSlTp(prices, settingsByUser) {
       "/rest/v1/trade_alerts?select=id,user_id,symbol,trigger_direction,entry_price,stop_loss,take_profit,margin_usd,leverage,notes,sl_fired_at,tp_fired_at&or=(sl_fired_at.is.null,tp_fired_at.is.null)"
     );
   } catch (e) {
-    console.error("SL/TP fetch error:", e.message);
     return;
   }
   if (!Array.isArray(rows) || rows.length === 0) return;
@@ -325,8 +365,6 @@ async function checkSlTp(prices, settingsByUser) {
       const column = level === "sl" ? "sl_fired_at" : "tp_fired_at";
       const levelPrice = level === "sl" ? row.stop_loss : row.take_profit;
 
-      // Claim atomically: the filter still requires the level to be unset, so
-      // a poller that loses the race gets an empty array and stays silent.
       let claimed = [];
       try {
         claimed = await supabase(
@@ -337,42 +375,74 @@ async function checkSlTp(prices, settingsByUser) {
             headers: { Prefer: "return=representation" },
           }
         );
-      } catch (e) {
-        console.error("SL/TP claim error:", e.message);
-      }
+      } catch {}
       if (!Array.isArray(claimed) || claimed.length === 0) continue;
 
-      const label = level === "sl" ? "Stop-loss" : "Take-profit";
+      const label = level === "sl" ? "🛑 Stop-Loss" : "🎯 Take-Profit";
       console.log(
-        `[${stamp()}] ${level.toUpperCase()} ${row.symbol} last=${price} level=${levelPrice}`
+        `[${stamp()}] ${label} HIT: ${row.symbol} | Mark: $${price} | Level: $${levelPrice}`
       );
 
+      const title = `${row.symbol} ${label} Hit!`;
+      const msg = `Price $${price} reached your ${level.toUpperCase()} target of $${levelPrice}.`;
+
+      // In-app notification
+      try {
+        await supabase("/rest/v1/notifications", {
+          method: "POST",
+          body: JSON.stringify({
+            user_id: row.user_id,
+            type: "sl_tp_hit",
+            title,
+            message: msg,
+            link: "/trades",
+            read: false,
+          }),
+          headers: { Prefer: "return=minimal" },
+        });
+      } catch {}
+
       const settings = settingsByUser[row.user_id];
-      if (settings?.notify_discord !== false && settings?.discord_webhook_url) {
-        await fireDiscord(
-          settings.discord_webhook_url,
-          `🎯 **${row.symbol}** hit **${level.toUpperCase()}** — last $${price} reached ${label.toLowerCase()} $${levelPrice}`
-        ).catch((e) => console.error("Discord error:", e.message));
+
+      // Discord
+      if (settings?.notify_discord !== false) {
+        let discordWebhooks = Array.isArray(settings?.discord_webhooks) && settings.discord_webhooks.length > 0
+          ? settings.discord_webhooks
+          : settings?.discord_webhook_url
+          ? [settings.discord_webhook_url]
+          : [];
+        if (discordWebhooks.length === 0 && FALLBACK_DISCORD_WEBHOOK) {
+          discordWebhooks = [FALLBACK_DISCORD_WEBHOOK];
+        }
+        for (const webhook of discordWebhooks) {
+          fireDiscord(webhook, `🔔 **${title}**\n${msg}`);
+        }
       }
+
+      // Telegram
+      if (settings?.notify_telegram !== false) {
+        let tgDests = Array.isArray(settings?.telegram_destinations) ? [...settings.telegram_destinations] : [];
+        if (tgDests.length === 0 && FALLBACK_TELEGRAM_BOT && FALLBACK_TELEGRAM_CHAT) {
+          tgDests = [{ bot_token: FALLBACK_TELEGRAM_BOT, chat_id: FALLBACK_TELEGRAM_CHAT }];
+        }
+        const tgMsg = `🔔 <b>${escapeHtml(title)}</b>\n${escapeHtml(msg)}`;
+        for (const dest of tgDests) {
+          if (dest && dest.bot_token && dest.chat_id) {
+            fireTelegram(dest.bot_token, dest.chat_id, tgMsg);
+          }
+        }
+      }
+
+      // Desktop
       if (settings?.notify_desktop !== false) {
-        await desktopNotify(
-          `${row.symbol} hit ${level.toUpperCase()}`,
-          `Last $${price} reached your ${label.toLowerCase()} at $${levelPrice}.`
-        ).catch(() => {});
+        desktopNotify(title, msg);
       }
     }
   }
 }
 
-/**
- * Which plan levels this snapshot has hit. Mirrors src/lib/sl-tp.ts — the
- * watcher is plain .mjs and cannot import TS, so the comparison is duplicated
- * here and must be kept in step with that module (and its tests).
- */
 function hitLevels(row, price) {
   if (!Number.isFinite(price) || price <= 0) return [];
-
-  // No stored side: breaking BELOW the trigger is taken LONG, ABOVE is SHORT.
   const isLong = row.trigger_direction !== "above";
   const out = [];
 
@@ -385,29 +455,23 @@ function hitLevels(row, price) {
     if (hit) out.push("tp");
   }
 
-  // A gap can cross both levels in one poll. Report only the one the price
-  // overshot least — that is the level it crossed first — so a single poll
-  // never emits contradictory alarms. Must match detectHits() in
-  // src/lib/sl-tp.ts, which the /trades page uses.
   if (out.length === 2) {
     const slDist = Math.abs(price - row.stop_loss);
     const tpDist = Math.abs(price - row.take_profit);
-    // Ties keep SL, the protective level — the same tie-break detectHits()
-    // applies.
     return slDist <= tpDist ? ["sl"] : ["tp"];
   }
   return out;
 }
 
 console.log(
-  `MOCHEX alert watcher started (poll every ${POLL_MS / 1000}s). Ctrl+C to stop.`
+  `🚀 EXMOCHEX background alert watcher active (polling MEXC every ${POLL_MS / 1000}s).`
 );
 
 async function loop() {
   try {
     await checkAll();
   } catch (e) {
-    console.error(`[${stamp()}] watcher error:`, e.message);
+    console.error(`[${stamp()}] Watcher cycle error:`, e.message);
   }
   setTimeout(loop, POLL_MS);
 }

@@ -7,7 +7,8 @@
     "build": "next build --webpack",
     "start": "next start",
     "lint": "eslint",
-    "test": "vitest run"
+    "test": "vitest run",
+    "watcher": "node scripts/alert-watcher.mjs --interval 2"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",

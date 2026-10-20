@@ -1,0 +1,22 @@
+# ==============================================================================
+# EXMOCHEX — Background Alert Watcher
+# ==============================================================================
+# Polls MEXC futures ticker, monitors Supabase watchlist items & active trades,
+# and pushes real-time alerts to Telegram, Discord, and in-app notifications.
+# ==============================================================================
+
+FROM node:20-alpine
+
+LABEL maintainer="EXMOCHEX"
+LABEL description="24/7 background alert watcher for EXMOCHEX"
+
+WORKDIR /app
+
+# The watcher is ultra-lightweight and relies entirely on Node.js built-ins.
+COPY scripts/alert-watcher.mjs ./scripts/
+
+# Default poll interval (seconds)
+ENV POLL_INTERVAL=2
+
+# Run alert watcher
+CMD ["sh", "-c", "node scripts/alert-watcher.mjs --interval ${POLL_INTERVAL}"]
