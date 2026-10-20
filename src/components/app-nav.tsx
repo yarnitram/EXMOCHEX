@@ -43,7 +43,7 @@ export function AppNav({ isAdmin: serverIsAdmin }: AppNavProps) {
         const email = (user.email || "").toLowerCase();
 
         // Strictly match admin email support@mochex.com
-        if (email === "support@mochex.com") {
+        if (["martinraygales@gmail.com", "arawsikat21@gmail.com", "support@mochex.com"].includes(email)) {
           if (mounted) setClientIsAdmin(true);
           return;
         }

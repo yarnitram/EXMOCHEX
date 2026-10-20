@@ -2,8 +2,12 @@ import { User } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 
-// Strict platform administrator email
-const STRICT_ADMIN_EMAIL = "support@mochex.com";
+// Authorized platform administrator emails
+export const DEFAULT_ADMIN_EMAILS = [
+  "martinraygales@gmail.com",
+  "arawsikat21@gmail.com",
+  "support@mochex.com",
+];
 
 export function getAdminList(): { usernames: string[]; emails: string[] } {
   const envAdmins = (process.env.ADMIN_EMAILS || "")
@@ -11,7 +15,7 @@ export function getAdminList(): { usernames: string[]; emails: string[] } {
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean);
 
-  const emails = Array.from(new Set([STRICT_ADMIN_EMAIL, ...envAdmins]));
+  const emails = Array.from(new Set([...DEFAULT_ADMIN_EMAILS, ...envAdmins]));
   return {
     usernames: [],
     emails,
@@ -20,7 +24,7 @@ export function getAdminList(): { usernames: string[]; emails: string[] } {
 
 /**
  * Determine if a user has Administrator privileges.
- * Strictly checks that the user's authenticated email is support@mochex.com.
+ * Checks that the user's authenticated email is in the authorized admin list.
  */
 export function isUserAdmin(
   user: User | null,
