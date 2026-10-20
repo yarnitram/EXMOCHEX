@@ -9,7 +9,10 @@ services:
     container_name: exmochex-watcher
     restart: unless-stopped
     env_file:
-      - .env.local
+      - path: .env
+        required: false
+      - path: .env.local
+        required: false
     environment:
       - POLL_INTERVAL=2
     logging:
@@ -35,8 +38,14 @@ services:
     environment:
       - PORT=3015
       - HOSTNAME=0.0.0.0
+      - NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL:-https://sup.ymatt.online}
+      - NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY:-}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY:-}
     env_file:
-      - .env.local
+      - path: .env
+        required: false
+      - path: .env.local
+        required: false
     logging:
       driver: "json-file"
       options:

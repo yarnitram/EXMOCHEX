@@ -2,8 +2,22 @@ import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { createClient as createServiceClientJs, type SupabaseClient } from "@supabase/supabase-js";
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+export function getSupabaseConfig() {
+  const url =
+    process.env["NEXT_PUBLIC_SUPABASE_URL"] ||
+    process.env.NEXT_PUBLIC_SUPABASE_URL ||
+    "https://sup.ymatt.online";
+  const anonKey =
+    process.env["NEXT_PUBLIC_SUPABASE_ANON_KEY"] ||
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+    process.env.SUPABASE_ANON_KEY ||
+    "";
+  const serviceKey =
+    process.env["SUPABASE_SERVICE_ROLE_KEY"] ||
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    "";
+  return { url, anonKey, serviceKey };
+}
 
 /**
  * Server-side Supabase client bound to the request's cookies.
@@ -12,8 +26,15 @@ const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
  */
 export async function createClient() {
   const cookieStore = await cookies();
+  const { url, anonKey } = getSupabaseConfig();
 
-  return createServerClient(supabaseUrl, supabaseAnonKey, {
+  if (!url || !anonKey) {
+    throw new Error(
+      `Supabase configuration missing: NEXT_PUBLIC_SUPABASE_URL (${url ? "set" : "missing"}), NEXT_PUBLIC_SUPABASE_ANON_KEY (${anonKey ? "set" : "missing"}). Check your .env or .env.local file.`
+    );
+  }
+
+  return createServerClient(url, anonKey, {
     cookies: {
       getAll() {
         return cookieStore.getAll();
@@ -41,8 +62,14 @@ export type ServerSupabase = ReturnType<typeof createClient> extends Promise<inf
  * NEVER import this into a Client Component.
  */
 export async function createServiceClient() {
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-  return createServiceClientJs(supabaseUrl, serviceKey, {
+  const { url, serviceKey } = getSupabaseConfig();
+  if (!url || !serviceKey) {
+    throw new Error(
+      `Supabase service role configuration missing: NEXT_PUBLIC_SUPABASE_URL (${url ? "set" : "missing"}), SUPABASE_SERVICE_ROLE_KEY (${serviceKey ? "set" : "missing"}).`
+    );
+  }
+
+  return createServiceClientJs(url, serviceKey, {
     auth: { autoRefreshToken: false, persistSession: false },
   }) as SupabaseClient;
 }

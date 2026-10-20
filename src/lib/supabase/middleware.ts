@@ -1,8 +1,18 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+export function getSupabaseConfig() {
+  const url =
+    process.env["NEXT_PUBLIC_SUPABASE_URL"] ||
+    process.env.NEXT_PUBLIC_SUPABASE_URL ||
+    "https://sup.ymatt.online";
+  const anonKey =
+    process.env["NEXT_PUBLIC_SUPABASE_ANON_KEY"] ||
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+    process.env.SUPABASE_ANON_KEY ||
+    "";
+  return { url, anonKey };
+}
 
 /**
  * Refreshes the Supabase auth session on any request that carries our
@@ -12,8 +22,13 @@ const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
  */
 export async function updateSession(request: NextRequest) {
   let supabaseResponse: NextResponse = NextResponse.next({ request });
+  const { url, anonKey } = getSupabaseConfig();
 
-  const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
+  if (!url || !anonKey) {
+    return { response: supabaseResponse, user: null };
+  }
+
+  const supabase = createServerClient(url, anonKey, {
     cookies: {
       getAll() {
         return request.cookies.getAll();
