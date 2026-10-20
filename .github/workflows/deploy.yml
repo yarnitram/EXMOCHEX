@@ -58,5 +58,5 @@ jobs:
           cd /opt/exmochex
           git fetch origin
           git reset --hard origin/${{ github.ref_name }}
-          docker compose --profile all up -d --build
+          docker compose --profile all up -d --build --remove-orphans --force-recreate
           docker compose ps
