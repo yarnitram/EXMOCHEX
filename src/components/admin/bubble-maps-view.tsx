@@ -51,9 +51,14 @@ interface MapData {
     chain: string;
     contract: string;
     price: number;
+    priceChange24h?: number;
     totalSupply: number;
     marketCap: number;
     riskScore: number;
+    pairAddress?: string;
+    dexId?: string;
+    isSolanaLive?: boolean;
+    notice?: string;
   };
   metrics: {
     totalHoldersSampled: number;
@@ -771,16 +776,91 @@ export function BubbleMapsView() {
         </form>
       </div>
 
+      {/* Live On-Chain Status Bar or Hybrid Notice */}
+      {data && (
+        <div className="flex flex-wrap items-center justify-between gap-2 bg-panel border border-line rounded-2xl px-4 py-2.5 text-xs">
+          <div className="flex items-center gap-2">
+            {data.token.isSolanaLive ? (
+              <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-gain/20 text-gain border border-gain/30 flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-gain animate-pulse" />
+                Live On-Chain (Solana Mainnet)
+              </span>
+            ) : (
+              <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-purple-500/20 text-purple-400 border border-purple-500/30 flex items-center gap-1.5">
+                ⚡ Live DEX Pricing ({data.token.chain})
+              </span>
+            )}
+            <span className="text-muted text-[11px] hidden sm:inline">
+              Contract: <span className="font-mono text-text">{data.token.contract}</span>
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {data.token.chain.toLowerCase() === "solana" ? (
+              <a
+                href={`https://solscan.io/token/${data.token.contract}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[11px] font-bold text-purple-400 hover:text-purple-300 hover:underline flex items-center gap-1"
+              >
+                Solscan ↗
+              </a>
+            ) : (
+              <a
+                href={`https://etherscan.io/token/${data.token.contract}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[11px] font-bold text-purple-400 hover:text-purple-300 hover:underline flex items-center gap-1"
+              >
+                Etherscan ↗
+              </a>
+            )}
+            {data.token.pairAddress && (
+              <a
+                href={`https://dexscreener.com/${data.token.chain.toLowerCase()}/${data.token.pairAddress}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[11px] font-bold text-accent hover:underline flex items-center gap-1"
+              >
+                DexScreener ↗
+              </a>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Notice Banner if EVM / Hybrid */}
+      {data?.token.notice && (
+        <div className="bg-panel-soft/80 border border-line rounded-2xl p-3 text-xs text-muted flex items-center gap-2.5">
+          <span className="text-sm">ℹ️</span>
+          <span>{data.token.notice}</span>
+        </div>
+      )}
+
       {/* Overview Metrics Cards */}
       {data && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <div className="bg-panel border border-line rounded-2xl p-3.5 shadow-xs">
-            <p className="text-[10px] text-muted uppercase font-semibold">Token / Price</p>
+            <div className="flex items-center justify-between">
+              <p className="text-[10px] text-muted uppercase font-semibold">Token / Price</p>
+              {typeof data.token.priceChange24h === "number" && (
+                <span
+                  className={`text-[10px] font-bold font-mono px-1.5 py-0.5 rounded-md ${
+                    data.token.priceChange24h >= 0
+                      ? "bg-gain/20 text-gain"
+                      : "bg-loss/20 text-loss"
+                  }`}
+                >
+                  {data.token.priceChange24h >= 0 ? "+" : ""}
+                  {data.token.priceChange24h}%
+                </span>
+              )}
+            </div>
             <div className="flex items-baseline gap-2 mt-0.5">
               <span className="text-base font-black text-text">${data.token.symbol}</span>
               <span className="text-xs font-mono text-muted">${data.token.price}</span>
             </div>
-            <p className="text-[10px] text-muted truncate mt-0.5">{data.token.chain}</p>
+            <p className="text-[10px] text-muted truncate mt-0.5">{data.token.name} ({data.token.chain})</p>
           </div>
 
           <div className="bg-panel border border-line rounded-2xl p-3.5 shadow-xs">
@@ -1134,8 +1214,24 @@ export function BubbleMapsView() {
                             <span className="font-bold text-text text-xs flex items-center gap-1.5">
                               {node.label}
                             </span>
-                            <span className="font-mono text-[10px] text-muted truncate max-w-[140px]">
+                            <span className="font-mono text-[10px] text-muted truncate max-w-[140px] flex items-center gap-1">
                               {node.id}
+                              {node.id.length > 25 && (
+                                <a
+                                  href={
+                                    data?.token.chain.toLowerCase() === "solana" || !node.id.startsWith("0x")
+                                      ? `https://solscan.io/account/${node.id}`
+                                      : `https://etherscan.io/address/${node.id}`
+                                  }
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="text-purple-400 hover:text-purple-300"
+                                  title="View on Explorer"
+                                >
+                                  ↗
+                                </a>
+                              )}
                             </span>
                           </div>
                         </td>
@@ -1302,13 +1398,29 @@ export function BubbleMapsView() {
                 <span className="text-[11px] font-mono text-muted truncate">
                   {selectedNode.id}
                 </span>
-                <button
-                  type="button"
-                  onClick={() => handleCopy(selectedNode.id)}
-                  className="px-2 py-1 rounded-lg bg-panel hover:bg-panel-soft text-[10px] font-bold text-text border border-line cursor-pointer shrink-0"
-                >
-                  {copied ? "✓ Copied" : "Copy"}
-                </button>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => handleCopy(selectedNode.id)}
+                    className="px-2 py-1 rounded-lg bg-panel hover:bg-panel-soft text-[10px] font-bold text-text border border-line cursor-pointer"
+                  >
+                    {copied ? "✓ Copied" : "Copy"}
+                  </button>
+                  {selectedNode.id.length > 25 && (
+                    <a
+                      href={
+                        data?.token.chain.toLowerCase() === "solana" || !selectedNode.id.startsWith("0x")
+                          ? `https://solscan.io/account/${selectedNode.id}`
+                          : `https://etherscan.io/address/${selectedNode.id}`
+                      }
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-2 py-1 rounded-lg bg-purple-600/20 hover:bg-purple-600/30 text-[10px] font-bold text-purple-300 border border-purple-500/30"
+                    >
+                      Explorer ↗
+                    </a>
+                  )}
+                </div>
               </div>
 
               {/* Holding Balance Grid */}
