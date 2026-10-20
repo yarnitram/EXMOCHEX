@@ -1123,3 +1123,31 @@ alter table public.trades
 -- Leverage in the archived journal trades archive table.
 alter table public.archived_journal_trades
   add column if not exists leverage numeric(18,2);
+
+
+-- ==============================================================================
+-- 33. Realtime CDC Publication & High-Performance Indexes
+-- ==============================================================================
+ALTER PUBLICATION supabase_realtime ADD TABLE watchlist_items;
+ALTER PUBLICATION supabase_realtime ADD TABLE trade_alerts;
+ALTER PUBLICATION supabase_realtime ADD TABLE notifications;
+ALTER PUBLICATION supabase_realtime ADD TABLE triggered_watchlist_items;
+
+ALTER TABLE watchlist_items REPLICA IDENTITY FULL;
+ALTER TABLE trade_alerts REPLICA IDENTITY FULL;
+ALTER TABLE notifications REPLICA IDENTITY FULL;
+ALTER TABLE triggered_watchlist_items REPLICA IDENTITY FULL;
+
+CREATE INDEX IF NOT EXISTS idx_watchlist_active 
+  ON watchlist_items(user_id, symbol) 
+  WHERE alert_fired = false;
+
+CREATE INDEX IF NOT EXISTS idx_trade_alerts_active 
+  ON trade_alerts(user_id, symbol) 
+  WHERE sl_fired_at IS NULL OR tp_fired_at IS NULL;
+
+CREATE INDEX IF NOT EXISTS idx_notifications_unread 
+  ON notifications(user_id, read, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_triggered_watchlist_user_fired 
+  ON triggered_watchlist_items(user_id, fired_at DESC);

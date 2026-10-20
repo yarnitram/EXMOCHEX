@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { sideForTrigger, type TradeAlert, type ArchivedTradeAlert, type TradeSide } from "@/lib/types";
+import { useRealtimeAlerts } from "@/context/realtime-alert-context";
 import { ModalShell } from "@/components/ui/modal-shell";
 import { TradeEditModal } from "./trade-edit-modal";
 import { ManualTradeModal } from "./manual-trade-modal";
@@ -264,6 +265,7 @@ function saveCols(cols: Record<ColKey, boolean>) {
 }
 
 export function TradesClient({ initialAlerts, refreshIntervalSec = 10 }: Props) {
+  const { onAlertChange } = useRealtimeAlerts();
   const [alerts, setAlerts] = useState<TradeAlert[]>(initialAlerts);
   const [archivedAlerts, setArchivedAlerts] = useState<ArchivedTradeAlert[]>([]);
   const [activeTab, setActiveTab] = useState<"active" | "closed" | "archive">("active");
@@ -449,25 +451,29 @@ export function TradesClient({ initialAlerts, refreshIntervalSec = 10 }: Props) 
     }
   }, [live, activeAlerts]);
 
+  // Instant real-time refresh when trade alert is updated or hit
+  useEffect(() => {
+    return onAlertChange(() => {
+      refreshAllAlerts();
+    });
+  }, [onAlertChange]);
+
+  // Initial fetch and relaxed 60s background safety sync
   useEffect(() => {
     let cancelled = false;
-    const intervalMs = Math.max(
-      3000,
-      (Number(refreshIntervalSec) || 10) * 1000
-    );
+    refreshAllAlerts();
 
-    const run = async () => {
-      if (cancelled) return;
-      await refreshAllAlerts();
-    };
+    const id = setInterval(() => {
+      if (!cancelled && !document.hidden) {
+        refreshAllAlerts();
+      }
+    }, 60_000);
 
-    run();
-    const id = setInterval(run, intervalMs);
     return () => {
       cancelled = true;
       clearInterval(id);
     };
-  }, [refreshIntervalSec]);
+  }, []);
 
   useEffect(() => {
     if (!notice) return;

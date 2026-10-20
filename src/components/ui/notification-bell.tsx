@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
+import { useRealtimeAlerts } from "@/context/realtime-alert-context";
 import type { Notification } from "@/lib/types";
 import {
   formatTimeAgo,
@@ -16,30 +16,14 @@ interface NotificationBellProps {
   initialUnreadCount?: number;
 }
 
-const POLL_INTERVAL = 30_000; // 30 seconds
-
 export function NotificationBell({ initialUnreadCount = 0 }: NotificationBellProps) {
-  const [unreadCount, setUnreadCount] = useState(initialUnreadCount);
+  const { unreadCount, setUnreadCount, refreshUnreadCount } = useRealtimeAlerts();
   const [isOpen, setIsOpen] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const router = useRouter();
-  const supabase = createClient();
-
-  // Fetch unread count
-  async function fetchUnreadCount() {
-    try {
-      const res = await fetch("/api/notifications/unread-count");
-      if (res.ok) {
-        const data = await res.json();
-        setUnreadCount(data.count ?? 0);
-      }
-    } catch {
-      // Silently fail for polling
-    }
-  }
 
   // Fetch recent notifications for dropdown
   async function fetchNotifications() {
@@ -70,7 +54,7 @@ export function NotificationBell({ initialUnreadCount = 0 }: NotificationBellPro
         prev.map((n) => (ids.includes(n.id) ? { ...n, read: true } : n))
       );
       // Refetch count
-      fetchUnreadCount();
+      refreshUnreadCount();
     } catch {
       // Silently fail
     }
@@ -125,13 +109,6 @@ export function NotificationBell({ initialUnreadCount = 0 }: NotificationBellPro
 
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
-
-  // Poll for unread count
-  useEffect(() => {
-    fetchUnreadCount();
-    const interval = setInterval(fetchUnreadCount, POLL_INTERVAL);
-    return () => clearInterval(interval);
   }, []);
 
   // Fetch notifications when dropdown opens

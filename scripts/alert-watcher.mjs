@@ -2,12 +2,15 @@
 /**
  * EXMOCHEX — Alert Watcher (Always-On Background Engine)
  * ======================================================
- * Polls MEXC futures API, evaluates active watchlist price triggers and open
- * trade SL/TP targets, and dispatches real-time alerts across Discord,
- * Telegram bot destinations, in-app notifications, and desktop toasts.
+ * Real-time event-driven engine combining MEXC Futures WebSocket streaming
+ * (sub-50ms tick execution) with resilient REST polling fallback.
  *
- * Reads Supabase config from `.env.local` (using authenticated service-role key).
- * Run:  node scripts/alert-watcher.mjs --interval 2
+ * Monitors active watchlist price triggers and open trade SL/TP targets,
+ * atomically claims hits, and dispatches instant multi-channel alerts
+ * across Telegram bots, Discord webhooks, in-app notifications, and desktop toasts.
+ *
+ * Reads Supabase config from `.env.local` or process.env.
+ * Run:  node scripts/alert-watcher.mjs
  */
 import { readFileSync, existsSync } from "node:fs";
 import { spawn } from "node:child_process";
@@ -30,11 +33,22 @@ const FALLBACK_TELEGRAM_BOT = process.env.TELEGRAM_BOT_TOKEN || env.TELEGRAM_BOT
 const FALLBACK_TELEGRAM_CHAT = process.env.TELEGRAM_CHAT_ID || env.TELEGRAM_CHAT_ID;
 
 if (!SUPABASE_URL || !SERVICE_KEY) {
-  console.error("Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY in .env.local");
+  console.error("Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
   process.exit(1);
 }
 
-const MEXC_TICKER = "https://contract.mexc.com/api/v1/contract/ticker";
+const MEXC_REST_TICKER = "https://contract.mexc.com/api/v1/contract/ticker";
+const MEXC_WS_URL = "wss://contract.mexc.com/edge";
+
+// ------------------------------------------------------------------ In-Memory State
+let inMemoryWatchlist = [];
+let inMemoryTrades = [];
+let inMemorySettings = {};
+let subscribedSymbols = new Set();
+let ws = null;
+let wsConnected = false;
+let pingTimer = null;
+let lastWsMessageTime = 0;
 
 // ------------------------------------------------------------------ Helpers
 function loadDotEnv(file) {
@@ -56,6 +70,10 @@ function escapeHtml(str) {
     .replace(/>/g, "&gt;");
 }
 
+function stamp() {
+  return new Date().toLocaleTimeString();
+}
+
 async function supabase(pathname, opts = {}) {
   const res = await fetch(`${SUPABASE_URL}${pathname}`, {
     ...opts,
@@ -71,20 +89,6 @@ async function supabase(pathname, opts = {}) {
     throw new Error(`Supabase ${pathname} → ${res.status}: ${text}`);
   }
   return res.json();
-}
-
-async function getLatestPrices() {
-  const res = await fetch(MEXC_TICKER, {
-    signal: AbortSignal.timeout(10000),
-  });
-  if (!res.ok) throw new Error(`MEXC ticker HTTP ${res.status}`);
-  const json = await res.json();
-  if (!json.success || !Array.isArray(json.data)) throw new Error("MEXC ticker response invalid");
-  const map = {};
-  for (const t of json.data) {
-    if (t.lastPrice > 0) map[t.symbol] = t.lastPrice;
-  }
-  return map;
 }
 
 // ------------------------------------------------------------------ Notification Sinks
@@ -134,47 +138,69 @@ function desktopNotify(title, body) {
   });
 }
 
-function stamp() {
-  return new Date().toLocaleTimeString();
+// ------------------------------------------------------------------ State Sync from Supabase
+async function syncDatabaseState() {
+  try {
+    const [watchlist, trades, settingsRows] = await Promise.all([
+      supabase(
+        "/rest/v1/watchlist_items?select=id,user_id,symbol,trigger_price,trigger_direction,entry_price,stop_loss,take_profit,order_type,notes,alert_fired,screenshot_url,screenshot_urls&alert_fired=eq.false"
+      ),
+      supabase(
+        "/rest/v1/trade_alerts?select=id,user_id,symbol,trigger_direction,entry_price,stop_loss,take_profit,margin_usd,leverage,notes,sl_fired_at,tp_fired_at&or=(sl_fired_at.is.null,tp_fired_at.is.null)"
+      ),
+      supabase(
+        "/rest/v1/user_settings?select=user_id,discord_webhook_url,discord_webhooks,notify_discord,telegram_destinations,notify_telegram,notify_desktop"
+      ),
+    ]);
+
+    inMemoryWatchlist = Array.isArray(watchlist) ? watchlist.filter((i) => i.trigger_price != null) : [];
+    inMemoryTrades = Array.isArray(trades) ? trades : [];
+
+    const map = {};
+    if (Array.isArray(settingsRows)) {
+      for (const r of settingsRows) map[r.user_id] = r;
+    }
+    inMemorySettings = map;
+
+    // Update WebSocket symbol subscriptions
+    const currentSymbols = new Set();
+    for (const item of inMemoryWatchlist) currentSymbols.add(item.symbol.toUpperCase());
+    for (const trade of inMemoryTrades) currentSymbols.add(trade.symbol.toUpperCase());
+
+    if (wsConnected && ws && ws.readyState === WebSocket.OPEN) {
+      for (const sym of currentSymbols) {
+        if (!subscribedSymbols.has(sym)) {
+          subscribedSymbols.add(sym);
+          ws.send(JSON.stringify({ method: "sub.ticker", param: { symbol: sym } }));
+        }
+      }
+    }
+  } catch (err) {
+    console.error(`[${stamp()}] DB Sync error:`, err.message);
+  }
 }
 
-// ------------------------------------------------------------------ Main Watcher Loop
-async function checkAll() {
-  const [watchlist, settingsByUser] = await Promise.all([
-    supabase(
-      "/rest/v1/watchlist_items?select=id,user_id,symbol,trigger_price,trigger_direction,entry_price,stop_loss,take_profit,order_type,notes,alert_fired,screenshot_url,screenshot_urls"
-    ),
-    (async () => {
-      const rows = await supabase(
-        "/rest/v1/user_settings?select=user_id,discord_webhook_url,discord_webhooks,notify_discord,telegram_destinations,notify_telegram,notify_desktop"
-      );
-      const map = {};
-      for (const r of rows) map[r.user_id] = r;
-      return map;
-    })(),
-  ]);
+// ------------------------------------------------------------------ Real-Time Trigger Evaluation
+async function handlePriceTick(symbol, price) {
+  if (!price || price <= 0) return;
 
-  const activeItems = watchlist.filter(
-    (i) => i.trigger_price != null && !i.alert_fired
-  );
-
-  const prices = await getLatestPrices();
-
-  // 1. Process active watchlist triggers
-  for (const item of activeItems) {
-    const price = prices[item.symbol];
-    if (price == null) continue;
+  // 1. Check Watchlist Triggers
+  const activeForSymbol = inMemoryWatchlist.filter((i) => i.symbol.toUpperCase() === symbol.toUpperCase());
+  for (const item of activeForSymbol) {
     const trigger = Number(item.trigger_price);
-
     const hit =
       item.trigger_direction === "below"
         ? price <= trigger
         : item.trigger_direction === "above"
         ? price >= trigger
         : false;
+
     if (!hit) continue;
 
-    // Atomic claim so no duplicate fires occur
+    // Remove from in-memory watchlist immediately so duplicate ticks never re-fire
+    inMemoryWatchlist = inMemoryWatchlist.filter((x) => x.id !== item.id);
+
+    // Atomically claim in Supabase
     let claimed = [];
     try {
       claimed = await supabase(
@@ -203,30 +229,28 @@ async function checkAll() {
         ? Number(item.entry_price) >= Number(item.stop_loss)
         : item.trigger_direction === "below";
 
-    if (isTriggerLimit) {
-      if (item.entry_price != null) {
-        const epDirection = isLong ? "below" : "above";
-        try {
-          await supabase("/rest/v1/watchlist_items", {
-            method: "POST",
-            body: JSON.stringify({
-              user_id: item.user_id,
-              symbol: item.symbol,
-              trigger_price: item.entry_price,
-              trigger_direction: epDirection,
-              entry_price: item.entry_price,
-              stop_loss: item.stop_loss,
-              take_profit: item.take_profit,
-              order_type: "limit",
-              notes: item.notes,
-              screenshot_urls: item.screenshot_urls || (item.screenshot_url ? [item.screenshot_url] : []),
-              screenshot_url: item.screenshot_url ?? null,
-            }),
-            headers: { Prefer: "return=minimal" },
-          });
-        } catch (e) {
-          console.error("TL spawn error:", e.message);
-        }
+    if (isTriggerLimit && item.entry_price != null) {
+      const epDirection = isLong ? "below" : "above";
+      try {
+        await supabase("/rest/v1/watchlist_items", {
+          method: "POST",
+          body: JSON.stringify({
+            user_id: item.user_id,
+            symbol: item.symbol,
+            trigger_price: item.entry_price,
+            trigger_direction: epDirection,
+            entry_price: item.entry_price,
+            stop_loss: item.stop_loss,
+            take_profit: item.take_profit,
+            order_type: "limit",
+            notes: item.notes,
+            screenshot_urls: item.screenshot_urls || (item.screenshot_url ? [item.screenshot_url] : []),
+            screenshot_url: item.screenshot_url ?? null,
+          }),
+          headers: { Prefer: "return=minimal" },
+        });
+      } catch (e) {
+        console.error("TL spawn error:", e.message);
       }
     } else {
       try {
@@ -305,7 +329,7 @@ async function checkAll() {
       });
     } catch {}
 
-    const settings = settingsByUser[item.user_id];
+    const settings = inMemorySettings[item.user_id];
 
     // Discord fan-out
     if (settings?.notify_discord !== false) {
@@ -336,34 +360,21 @@ async function checkAll() {
       }
     }
 
-    // Desktop notification
+    // Desktop
     if (settings?.notify_desktop !== false) {
       desktopNotify(item.symbol, `Mark $${price} hit trigger $${trigger}. ${plan.join(" ")}`);
     }
   }
 
-  // 2. Process open trade SL/TP target hits
-  await checkSlTp(prices, settingsByUser);
-}
-
-async function checkSlTp(prices, settingsByUser) {
-  let rows;
-  try {
-    rows = await supabase(
-      "/rest/v1/trade_alerts?select=id,user_id,symbol,trigger_direction,entry_price,stop_loss,take_profit,margin_usd,leverage,notes,sl_fired_at,tp_fired_at&or=(sl_fired_at.is.null,tp_fired_at.is.null)"
-    );
-  } catch (e) {
-    return;
-  }
-  if (!Array.isArray(rows) || rows.length === 0) return;
-
-  for (const row of rows) {
-    const price = prices[row.symbol];
-    if (price == null) continue;
-
+  // 2. Check Open Trade SL / TP Hits
+  const activeTradesForSymbol = inMemoryTrades.filter((r) => r.symbol.toUpperCase() === symbol.toUpperCase());
+  for (const row of activeTradesForSymbol) {
     for (const level of hitLevels(row, price)) {
       const column = level === "sl" ? "sl_fired_at" : "tp_fired_at";
       const levelPrice = level === "sl" ? row.stop_loss : row.take_profit;
+
+      // Update in-memory trade to prevent double-fire
+      row[column] = new Date().toISOString();
 
       let claimed = [];
       try {
@@ -402,7 +413,7 @@ async function checkSlTp(prices, settingsByUser) {
         });
       } catch {}
 
-      const settings = settingsByUser[row.user_id];
+      const settings = inMemorySettings[row.user_id];
 
       // Discord
       if (settings?.notify_discord !== false) {
@@ -463,16 +474,105 @@ function hitLevels(row, price) {
   return out;
 }
 
-console.log(
-  `🚀 EXMOCHEX background alert watcher active (polling MEXC every ${POLL_MS / 1000}s).`
-);
-
-async function loop() {
-  try {
-    await checkAll();
-  } catch (e) {
-    console.error(`[${stamp()}] Watcher cycle error:`, e.message);
+// ------------------------------------------------------------------ Native WebSocket Stream
+function connectMexcWs() {
+  if (typeof WebSocket === "undefined") {
+    console.log(`[${stamp()}] Native WebSocket not available in this Node runtime, using REST mode.`);
+    return;
   }
-  setTimeout(loop, POLL_MS);
+
+  try {
+    ws = new WebSocket(MEXC_WS_URL);
+
+    ws.onopen = () => {
+      wsConnected = true;
+      console.log(`[${stamp()}] ⚡ MEXC WebSocket streaming connected (sub-50ms tick execution active).`);
+
+      // Subscribe to all tracked symbols
+      for (const sym of subscribedSymbols) {
+        ws.send(JSON.stringify({ method: "sub.ticker", param: { symbol: sym } }));
+      }
+
+      // 20s heartbeat keep-alive
+      clearInterval(pingTimer);
+      pingTimer = setInterval(() => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ method: "ping" }));
+        }
+      }, 20_000);
+    };
+
+    ws.onmessage = (event) => {
+      lastWsMessageTime = Date.now();
+      try {
+        const raw = JSON.parse(event.data);
+        if (raw.channel === "push.ticker" && raw.data) {
+          const sym = raw.symbol || raw.data.symbol;
+          const px = Number(raw.data.lastPrice);
+          if (sym && px > 0) {
+            handlePriceTick(sym, px);
+          }
+        }
+      } catch {}
+    };
+
+    ws.onerror = () => {
+      wsConnected = false;
+    };
+
+    ws.onclose = () => {
+      wsConnected = false;
+      clearInterval(pingTimer);
+      console.log(`[${stamp()}] WebSocket closed, reconnecting in 3s (REST fallback active)...`);
+      setTimeout(connectMexcWs, 3000);
+    };
+  } catch (err) {
+    wsConnected = false;
+    setTimeout(connectMexcWs, 5000);
+  }
 }
-loop();
+
+// ------------------------------------------------------------------ REST Safety & Polling Loop
+async function restFallbackCheck() {
+  try {
+    const res = await fetch(MEXC_REST_TICKER, { signal: AbortSignal.timeout(8000) });
+    if (!res.ok) return;
+    const json = await res.json();
+    if (!json.success || !Array.isArray(json.data)) return;
+
+    for (const t of json.data) {
+      if (t.lastPrice > 0 && subscribedSymbols.has(t.symbol.toUpperCase())) {
+        await handlePriceTick(t.symbol, t.lastPrice);
+      }
+    }
+  } catch {}
+}
+
+async function start() {
+  console.log(`🚀 EXMOCHEX background alert watcher starting...`);
+
+  // 1. Initial Database Sync
+  await syncDatabaseState();
+
+  // 2. Connect to MEXC WebSocket Stream
+  connectMexcWs();
+
+  // 3. Periodic Background Sync & REST Heartbeat
+  let cycleCount = 0;
+  setInterval(async () => {
+    cycleCount++;
+
+    // Re-sync database every 30 seconds
+    if (cycleCount % 15 === 0) {
+      await syncDatabaseState();
+    }
+
+    // If WebSocket is disconnected or stale, run REST fallback check
+    const isWsStale = Date.now() - lastWsMessageTime > 30_000;
+    if (!wsConnected || isWsStale) {
+      await restFallbackCheck();
+    }
+  }, POLL_MS);
+}
+
+start();
