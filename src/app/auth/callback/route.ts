@@ -1,9 +1,17 @@
 import { NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
+import { getSupabaseConfig } from "@/lib/supabase/server";
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+function isLocalOrPrivate(host: string): boolean {
+  return (
+    host.includes("localhost") ||
+    host.includes("127.0.0.1") ||
+    /^192\.168\./.test(host) ||
+    /^10\./.test(host) ||
+    /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(host)
+  );
+}
 
 /**
  * Auth callback — exchanges an OAuth / magic-link code for a session
@@ -20,8 +28,8 @@ function getRequestOrigin(request: Request): string {
     if (cleanHost.includes("0.0.0.0")) {
       cleanHost = cleanHost.replace("0.0.0.0", "localhost");
     }
-    const isLocal = cleanHost.includes("localhost") || cleanHost.includes("127.0.0.1");
-    const protocol = isLocal ? (protoHeader || "http") : (protoHeader || "https");
+    const isLocal = isLocalOrPrivate(cleanHost);
+    const protocol = protoHeader || (isLocal ? "http" : "https");
     return `${protocol}://${cleanHost}`;
   }
 
@@ -30,25 +38,21 @@ function getRequestOrigin(request: Request): string {
   if (cleanHost.includes("0.0.0.0")) {
     cleanHost = cleanHost.replace("0.0.0.0", "localhost");
   }
-  const isLocal = cleanHost.includes("localhost") || cleanHost.includes("127.0.0.1");
-  const protocol = isLocal ? url.protocol.replace(":", "") : "https";
+  const isLocal = isLocalOrPrivate(cleanHost);
+  const protocol = protoHeader || (isLocal ? url.protocol.replace(":", "") : "https");
   return `${protocol}://${cleanHost}`;
 }
 
-/**
- * Auth callback — exchanges an OAuth / magic-link code for a session
- * and stores it in cookies. Kept separate so it can use its own cookie
- * manager without the proxy-opting concerns of the app pages.
- */
 export async function GET(request: Request) {
   const requestUrl = new URL(request.url);
   const origin = getRequestOrigin(request);
   const code = requestUrl.searchParams.get("code");
-  const next = requestUrl.searchParams.get("next") ?? "/journal";
+  const next = requestUrl.searchParams.get("next") ?? "/watchlist";
 
   if (code) {
     const cookieStore = await cookies();
-    const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
+    const { url, anonKey } = getSupabaseConfig();
+    const supabase = createServerClient(url, anonKey, {
       cookies: {
         getAll() {
           return cookieStore.getAll();
