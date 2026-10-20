@@ -5,15 +5,27 @@ on:
     branches:
       - main
       - master
+  pull_request:
+    branches:
+      - main
+      - master
 
 concurrency:
-  group: deploy-staging
+  group: deploy-staging-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   test:
-    name: Run Automated Tests & Typecheck
-    runs-on: ubuntu-latest
+    name: Cross-Platform Test & Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    env:
+      NEXT_PUBLIC_SUPABASE_URL: "https://sup.ymatt.online"
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: "ci-build-placeholder-key"
+      NEXT_TELEMETRY_DISABLED: 1
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -26,15 +38,19 @@ jobs:
       - name: Install Dependencies
         run: npm ci --legacy-peer-deps || npm install --legacy-peer-deps
 
-      - name: TypeScript Verification
+      - name: TypeScript Typecheck
         run: npx tsc --noEmit
 
       - name: Run Vitest Unit Tests
         run: npm test
 
+      - name: Verify Production Next.js Build
+        run: npm run build
+
   deploy:
     name: Deploy to Proxmox LXC Staging
     needs: test
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
     runs-on: [self-hosted, linux]
     steps:
       - name: Pull Latest Changes & Rebuild Containers
