@@ -5,6 +5,14 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import * as d3 from "d3-force";
 import type { AdminTrackedWallet, AdminTrackedToken } from "@/lib/types";
+import { cleanSymbol, fmtPx, fmtPct } from "@/lib/format";
+
+interface MexcSearchTicker {
+  symbol: string;
+  lastPrice: number;
+  riseFallRate: number;
+  amount24?: number;
+}
 
 interface HolderNode extends d3.SimulationNodeDatum {
   id: string;
@@ -98,6 +106,17 @@ export function BubbleMapsView() {
   const [data, setData] = useState<MapData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Watchlist-style MEXC search
+  const [mexcResults, setMexcResults] = useState<MexcSearchTicker[] | null>(null);
+  const [searchingMexc, setSearchingMexc] = useState(false);
+  const searchDebounceRef = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    };
+  }, []);
 
   // Inspector & Highlights
   const [selectedNode, setSelectedNode] = useState<HolderNode | null>(null);
@@ -629,18 +648,58 @@ export function BubbleMapsView() {
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const handleSearchInputChange = (val: string) => {
+    setCustomInput(val);
+    setShowSuggestions(true);
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+
+    const trimmed = val.trim();
+    if (!trimmed) {
+      setMexcResults(null);
+      setSearchingMexc(false);
+      return;
+    }
+
+    setSearchingMexc(true);
+    searchDebounceRef.current = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/mexc/futures?q=${encodeURIComponent(trimmed)}`);
+        const json = await res.json();
+        if (res.ok && Array.isArray(json.tickers)) {
+          setMexcResults(json.tickers);
+        } else {
+          setMexcResults([]);
+        }
+      } catch {
+        setMexcResults([]);
+      } finally {
+        setSearchingMexc(false);
+      }
+    }, 250);
+  };
+
+  const handleSelectMexcToken = (t: MexcSearchTicker) => {
+    const sym = cleanSymbol(t.symbol);
+    setCurrentToken(sym);
+    setCustomInput("");
+    setShowSuggestions(false);
+    setMexcResults(null);
+  };
+
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!customInput.trim()) return;
     setCurrentToken(customInput.trim().toUpperCase());
     setCustomInput("");
     setShowSuggestions(false);
+    setMexcResults(null);
   };
 
   const handleSuggestionClick = (sym: string) => {
     setCurrentToken(sym);
     setCustomInput("");
     setShowSuggestions(false);
+    setMexcResults(null);
   };
 
   const SOLANA_MEMES = ["POPCAT", "GOAT", "MOODENG", "PNUT", "CHILLGUY", "WIF", "BONK"];
@@ -774,28 +833,89 @@ export function BubbleMapsView() {
           <div className="relative flex-1">
             <input
               type="text"
-              placeholder="Search coin or contract..."
+              placeholder="Search MEXC coin or contract..."
               value={customInput}
-              onChange={(e) => {
-                setCustomInput(e.target.value);
-                setShowSuggestions(true);
+              onChange={(e) => handleSearchInputChange(e.target.value)}
+              onFocus={() => {
+                if (customInput.trim()) setShowSuggestions(true);
               }}
-              onFocus={() => setShowSuggestions(true)}
-              onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
+              onBlur={() => setTimeout(() => setShowSuggestions(false), 250)}
               className="w-full bg-panel-soft border border-line rounded-xl px-3 py-1.5 text-xs text-text placeholder:text-muted focus:outline-none focus:border-purple-500"
             />
-            {showSuggestions && customInput.trim() && filteredSuggestions.length > 0 && (
-              <div className="absolute top-full left-0 right-0 mt-1 bg-panel border border-line rounded-xl shadow-lg overflow-hidden z-50">
-                {filteredSuggestions.map((sym) => (
-                  <button
-                    key={sym}
-                    type="button"
-                    onClick={() => handleSuggestionClick(sym)}
-                    className="w-full text-left px-3 py-2 text-xs text-text hover:bg-panel-soft transition-colors cursor-pointer"
-                  >
-                    ${sym}
-                  </button>
-                ))}
+            {showSuggestions && customInput.trim() && (
+              <div className="absolute top-full right-0 w-80 sm:w-96 mt-1.5 bg-panel border border-line rounded-2xl shadow-2xl overflow-hidden z-50 animate-in fade-in zoom-in-95 duration-100 flex flex-col">
+                <div className="flex items-center justify-between text-[10px] font-mono uppercase text-muted tracking-wider px-3 py-2 bg-panel-soft/70 border-b border-line">
+                  <span>
+                    {searchingMexc
+                      ? "Searching MEXC..."
+                      : mexcResults
+                      ? `${mexcResults.length} Markets Found`
+                      : "MEXC Markets"}
+                  </span>
+                  <span>MEXC Futures</span>
+                </div>
+
+                <div className="max-h-72 overflow-y-auto divide-y divide-line/60">
+                  {searchingMexc ? (
+                    <div className="p-5 text-center text-muted font-mono flex flex-col items-center justify-center gap-2">
+                      <div className="w-5 h-5 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />
+                      <span className="text-xs">Searching MEXC live futures...</span>
+                    </div>
+                  ) : mexcResults && mexcResults.length === 0 ? (
+                    <div className="p-5 text-center text-muted flex flex-col gap-1">
+                      <span className="font-semibold text-text text-xs">No MEXC contracts match "{customInput}"</span>
+                      <span className="text-muted text-[11px]">
+                        Press "Scan Map" to scan directly on-chain by token name or contract.
+                      </span>
+                    </div>
+                  ) : mexcResults ? (
+                    mexcResults.map((t) => {
+                      const sym = t.symbol.toUpperCase();
+                      const label = cleanSymbol(sym);
+                      const isUp = t.riseFallRate >= 0;
+
+                      return (
+                        <div
+                          key={t.symbol}
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            handleSelectMexcToken(t);
+                          }}
+                          className="p-2.5 px-3 flex items-center justify-between gap-3 hover:bg-panel-soft/80 transition-colors cursor-pointer group"
+                        >
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <div className="w-7 h-7 rounded-full bg-purple-500/15 border border-purple-500/30 flex items-center justify-center font-mono font-black text-[11px] text-purple-400 shrink-0">
+                              {label.slice(0, 2)}
+                            </div>
+                            <div className="flex flex-col leading-tight min-w-0">
+                              <span className="font-bold text-text text-xs group-hover:text-purple-400 transition-colors truncate">
+                                {label}
+                              </span>
+                              <span className="font-mono text-[10px] text-muted truncate">
+                                {sym.replace("_USDT", "")} · USDT Perpetual
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="flex flex-col items-end leading-tight shrink-0">
+                            <span className="font-mono font-bold text-text text-xs">
+                              ${fmtPx(t.lastPrice)}
+                            </span>
+                            <span
+                              className={`text-[10px] font-mono font-semibold px-1.5 py-0.5 rounded ${
+                                isUp
+                                  ? "text-gain bg-gain/10"
+                                  : "text-loss bg-loss/10"
+                              }`}
+                            >
+                              {fmtPct(t.riseFallRate)}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })
+                  ) : null}
+                </div>
               </div>
             )}
           </div>
