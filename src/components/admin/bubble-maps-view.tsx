@@ -120,6 +120,11 @@ export function BubbleMapsView() {
 
   // Inspector & Highlights
   const [selectedNode, setSelectedNode] = useState<HolderNode | null>(null);
+  const [hoveredNodeInfo, setHoveredNodeInfo] = useState<{
+    node: HolderNode;
+    x: number;
+    y: number;
+  } | null>(null);
   const [highlightFilter, setHighlightFilter] = useState<"all" | "accumulating" | "dumping" | "clusters">("all");
   const [copied, setCopied] = useState(false);
   const [selectedMemeTab, setSelectedMemeTab] = useState<"all" | "solana" | "evm">("all");
@@ -138,6 +143,8 @@ export function BubbleMapsView() {
 
   const simulationRef = useRef<d3.Simulation<HolderNode, TransferLink> | null>(null);
   const draggedNodeRef = useRef<HolderNode | null>(null);
+  const dragStartPosRef = useRef<{ x: number; y: number } | null>(null);
+  const dragDistanceRef = useRef<number>(0);
   const hoveredNodeRef = useRef<HolderNode | null>(null);
 
   // Watchlist & Tracking State
@@ -311,6 +318,7 @@ export function BubbleMapsView() {
     setLoading(true);
     setError(null);
     setSelectedNode(null);
+    setHoveredNodeInfo(null);
     try {
       const res = await fetch(`/api/admin/bubblemaps?token=${encodeURIComponent(tokenSymbol)}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -597,6 +605,9 @@ export function BubbleMapsView() {
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
 
+    dragStartPosRef.current = { x, y };
+    dragDistanceRef.current = 0;
+
     const hit = findNodeAt(x, y);
     if (hit) {
       draggedNodeRef.current = hit;
@@ -612,7 +623,14 @@ export function BubbleMapsView() {
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
 
+    if (dragStartPosRef.current) {
+      const dx = x - dragStartPosRef.current.x;
+      const dy = y - dragStartPosRef.current.y;
+      dragDistanceRef.current = Math.hypot(dx, dy);
+    }
+
     if (draggedNodeRef.current) {
+      setHoveredNodeInfo(null);
       draggedNodeRef.current.fx = x;
       draggedNodeRef.current.fy = y;
     } else {
@@ -621,25 +639,54 @@ export function BubbleMapsView() {
       if (canvasRef.current) {
         canvasRef.current.style.cursor = hit ? "pointer" : "default";
       }
+      if (hit) {
+        setHoveredNodeInfo({ node: hit, x, y });
+      } else {
+        setHoveredNodeInfo(null);
+      }
     }
   };
 
   const handlePointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const rect = canvasRef.current?.getBoundingClientRect();
-    if (draggedNodeRef.current) {
-      draggedNodeRef.current.fx = null;
-      draggedNodeRef.current.fy = null;
+    const wasDragged = draggedNodeRef.current;
+    const dist = dragDistanceRef.current;
+
+    if (wasDragged) {
+      wasDragged.fx = null;
+      wasDragged.fy = null;
       simulationRef.current?.alphaTarget(0);
       draggedNodeRef.current = null;
-    } else if (rect) {
+    }
+
+    dragStartPosRef.current = null;
+
+    // Distinguish click from drag (drag distance < 6px is a click)
+    if (dist < 6 && rect) {
       const x = e.clientX - rect.left;
       const y = e.clientY - rect.top;
       const hit = findNodeAt(x, y);
       if (hit) {
         setSelectedNode(hit);
         setCopied(false);
+        // On mobile / narrow screens, smoothly scroll to inspector
+        if (typeof window !== "undefined" && window.innerWidth < 1024) {
+          document.getElementById("wallet-inspector")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        }
       }
     }
+  };
+
+  const handlePointerLeave = () => {
+    if (draggedNodeRef.current) {
+      draggedNodeRef.current.fx = null;
+      draggedNodeRef.current.fy = null;
+      simulationRef.current?.alphaTarget(0);
+      draggedNodeRef.current = null;
+    }
+    dragStartPosRef.current = null;
+    hoveredNodeRef.current = null;
+    setHoveredNodeInfo(null);
   };
 
   const handleCopy = (text: string) => {
@@ -1209,8 +1256,57 @@ export function BubbleMapsView() {
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}
+            onPointerLeave={handlePointerLeave}
             className="w-full h-full block touch-none"
           />
+
+          {/* Instant Node Hover Tooltip */}
+          {hoveredNodeInfo && !draggedNodeRef.current && (
+            <div
+              className={`pointer-events-none absolute z-30 transform -translate-x-1/2 px-3 py-2 rounded-xl bg-panel/95 backdrop-blur-md border border-line shadow-2xl text-xs flex flex-col gap-1 max-w-xs transition-all duration-75 ${
+                hoveredNodeInfo.y < 120 ? "translate-y-2" : "-translate-y-full mb-3"
+              }`}
+              style={{
+                left: `${Math.max(130, Math.min(hoveredNodeInfo.x, (containerRef.current?.clientWidth || 800) - 130))}px`,
+                top: hoveredNodeInfo.y < 120
+                  ? `${hoveredNodeInfo.y + (hoveredNodeInfo.node.radius || 20) + 8}px`
+                  : `${hoveredNodeInfo.y - (hoveredNodeInfo.node.radius || 20) - 8}px`,
+              }}
+            >
+              <div className="flex items-center justify-between gap-3">
+                <span className="font-bold text-text truncate">
+                  {hoveredNodeInfo.node.label}
+                </span>
+                <span
+                  className={`px-1.5 py-0.2 rounded text-[10px] font-bold uppercase ${
+                    hoveredNodeInfo.node.whaleStatus.action === "accumulating"
+                      ? "bg-gain/20 text-gain border border-gain/30"
+                      : hoveredNodeInfo.node.whaleStatus.action === "dumping"
+                      ? "bg-loss/20 text-loss border border-loss/30"
+                      : "bg-panel-soft text-muted border border-line"
+                  }`}
+                >
+                  {hoveredNodeInfo.node.whaleStatus.action}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-4 font-mono text-[11px]">
+                <span className="text-muted">Supply Share:</span>
+                <span className="font-bold text-text">{hoveredNodeInfo.node.holdingPct}%</span>
+              </div>
+              <div className="flex items-center justify-between gap-4 font-mono text-[11px]">
+                <span className="text-muted">Est. Value:</span>
+                <span className="font-bold text-accent">
+                  ${(hoveredNodeInfo.node.holdingUsd / 1e3).toFixed(1)}k
+                </span>
+              </div>
+              <div className="font-mono text-[10px] text-muted truncate border-t border-line/50 pt-1 mt-0.5">
+                {hoveredNodeInfo.node.id}
+              </div>
+              <div className="text-[10px] text-purple-400 font-semibold text-center pt-0.5">
+                Click bubble to inspect details →
+              </div>
+            </div>
+          )}
 
           {/* Graph Legend Overlay */}
           <div className="absolute top-3 left-3 pointer-events-none bg-panel/85 backdrop-blur-xs border border-line/60 rounded-xl p-2.5 flex flex-col gap-1 text-[11px] font-medium text-muted shadow-xs">
@@ -1535,7 +1631,7 @@ export function BubbleMapsView() {
         </div>
 
         {/* Side Whale & Wallet Inspector */}
-        <div className="lg:col-span-1 bg-panel border border-line rounded-3xl p-5 flex flex-col gap-4 shadow-sm overflow-y-auto max-h-[680px]">
+        <div id="wallet-inspector" className="lg:col-span-1 bg-panel border border-line rounded-3xl p-5 flex flex-col gap-4 shadow-sm overflow-y-auto max-h-[680px]">
           {selectedNode ? (
             <div className="space-y-4 animate-in fade-in duration-150">
               {/* Header */}
