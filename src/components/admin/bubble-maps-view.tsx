@@ -14,6 +14,7 @@ interface HolderNode extends d3.SimulationNodeDatum {
   holdingUsd: number;
   type: "dev" | "whale" | "sniper" | "cex" | "pool" | "holder";
   clusterId: number;
+  explorerUrl?: string;
   whaleStatus: {
     action: "accumulating" | "dumping" | "holding";
     netFlow24h: number;
@@ -57,7 +58,9 @@ interface MapData {
     riskScore: number;
     pairAddress?: string;
     dexId?: string;
+    isOnChainLive?: boolean;
     isSolanaLive?: boolean;
+    explorerUrl?: string;
     notice?: string;
   };
   metrics: {
@@ -73,6 +76,8 @@ interface MapData {
   nodes: HolderNode[];
   links: TransferLink[];
   availablePresets: string[];
+  solanaPresets?: string[];
+  evmPresets?: string[];
 }
 
 const CLUSTER_COLORS = [
@@ -98,6 +103,7 @@ export function BubbleMapsView() {
   const [selectedNode, setSelectedNode] = useState<HolderNode | null>(null);
   const [highlightFilter, setHighlightFilter] = useState<"all" | "accumulating" | "dumping" | "clusters">("all");
   const [copied, setCopied] = useState(false);
+  const [selectedMemeTab, setSelectedMemeTab] = useState<"all" | "solana" | "evm">("all");
 
   // View Mode: Interactive Map vs Whale Data Table
   const [viewMode, setViewMode] = useState<"map" | "table">("map");
@@ -637,8 +643,15 @@ export function BubbleMapsView() {
     setShowSuggestions(false);
   };
 
-  const HOT_TOKENS = ["POPCAT", "GOAT", "MOODENG", "PNUT", "CHILLGUY", "SPX", "NEIRO"];
-  const allSuggestions = Array.from(new Set([...HOT_TOKENS, ...trackedTokens.map((t) => t.symbol)]));
+  const SOLANA_MEMES = ["POPCAT", "GOAT", "MOODENG", "PNUT", "CHILLGUY", "WIF", "BONK"];
+  const EVM_MEMES = ["PEPE", "BRETT", "SHIB", "MOG", "DEGEN", "SPX", "FLOKI"];
+  const HOT_TOKENS =
+    selectedMemeTab === "solana"
+      ? SOLANA_MEMES
+      : selectedMemeTab === "evm"
+      ? EVM_MEMES
+      : [...SOLANA_MEMES, ...EVM_MEMES];
+  const allSuggestions = Array.from(new Set([...SOLANA_MEMES, ...EVM_MEMES, ...trackedTokens.map((t) => t.symbol)]));
   const filteredSuggestions = allSuggestions.filter((sym) =>
     sym.toLowerCase().includes(customInput.toLowerCase())
   );
@@ -697,18 +710,51 @@ export function BubbleMapsView() {
 
       {/* Preset Token Selector & Contract Search Bar */}
       <div className="bg-panel/90 backdrop-blur border border-line rounded-2xl p-3.5 flex flex-wrap items-center justify-between gap-3 shadow-xs">
-        {/* Token Presets (Non-Major / Meme Coins) */}
-        <div className="flex items-center gap-1.5 overflow-x-auto py-1">
-          <span className="text-[11px] font-semibold text-muted shrink-0 mr-1">
-            Hot Tokens:
-          </span>
-          {HOT_TOKENS.map(
-            (sym) => (
+        {/* Token Presets (Meme Coin Focus) */}
+        <div className="flex flex-col gap-2 w-full lg:w-auto">
+          <div className="flex items-center gap-1 bg-panel-soft/80 p-0.5 rounded-xl border border-line w-fit">
+            <button
+              type="button"
+              onClick={() => setSelectedMemeTab("all")}
+              className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
+                selectedMemeTab === "all"
+                  ? "bg-purple-600 text-white shadow-xs"
+                  : "text-muted hover:text-text"
+              }`}
+            >
+              🔥 All Memes
+            </button>
+            <button
+              type="button"
+              onClick={() => setSelectedMemeTab("solana")}
+              className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
+                selectedMemeTab === "solana"
+                  ? "bg-purple-600 text-white shadow-xs"
+                  : "text-muted hover:text-text"
+              }`}
+            >
+              🟣 Solana Memes
+            </button>
+            <button
+              type="button"
+              onClick={() => setSelectedMemeTab("evm")}
+              className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
+                selectedMemeTab === "evm"
+                  ? "bg-purple-600 text-white shadow-xs"
+                  : "text-muted hover:text-text"
+              }`}
+            >
+              🔵 Base & ETH Memes
+            </button>
+          </div>
+
+          <div className="flex items-center gap-1.5 overflow-x-auto py-0.5 max-w-[600px]">
+            {HOT_TOKENS.map((sym) => (
               <button
                 key={sym}
                 type="button"
                 onClick={() => setCurrentToken(sym)}
-                className={`px-3 py-1 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer ${
+                className={`px-2.5 py-1 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer ${
                   currentToken === sym
                     ? "bg-purple-600 text-white shadow-xs"
                     : "bg-panel-soft text-muted hover:text-text border border-line"
@@ -716,8 +762,8 @@ export function BubbleMapsView() {
               >
                 ${sym}
               </button>
-            )
-          )}
+            ))}
+          </div>
         </div>
 
         {/* Custom Contract / Symbol Search */}
@@ -780,10 +826,10 @@ export function BubbleMapsView() {
       {data && (
         <div className="flex flex-wrap items-center justify-between gap-2 bg-panel border border-line rounded-2xl px-4 py-2.5 text-xs">
           <div className="flex items-center gap-2">
-            {data.token.isSolanaLive ? (
+            {data.token.isOnChainLive ? (
               <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-gain/20 text-gain border border-gain/30 flex items-center gap-1.5">
                 <span className="w-1.5 h-1.5 rounded-full bg-gain animate-pulse" />
-                Live On-Chain (Solana Mainnet)
+                Live On-Chain ({data.token.chain})
               </span>
             ) : (
               <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-purple-500/20 text-purple-400 border border-purple-500/30 flex items-center gap-1.5">
@@ -796,25 +842,26 @@ export function BubbleMapsView() {
           </div>
 
           <div className="flex items-center gap-2">
-            {data.token.chain.toLowerCase() === "solana" ? (
-              <a
-                href={`https://solscan.io/token/${data.token.contract}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-[11px] font-bold text-purple-400 hover:text-purple-300 hover:underline flex items-center gap-1"
-              >
-                Solscan ↗
-              </a>
-            ) : (
-              <a
-                href={`https://etherscan.io/token/${data.token.contract}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-[11px] font-bold text-purple-400 hover:text-purple-300 hover:underline flex items-center gap-1"
-              >
-                Etherscan ↗
-              </a>
-            )}
+            <a
+              href={
+                data.token.explorerUrl ||
+                (data.token.chain.toLowerCase() === "solana"
+                  ? `https://solscan.io/token/${data.token.contract}`
+                  : `https://etherscan.io/token/${data.token.contract}`)
+              }
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-[11px] font-bold text-purple-400 hover:text-purple-300 hover:underline flex items-center gap-1"
+            >
+              {data.token.chain === "Base"
+                ? "Basescan"
+                : data.token.chain === "Solana"
+                ? "Solscan"
+                : data.token.chain === "Bsc"
+                ? "BscScan"
+                : "Etherscan"}{" "}
+              ↗
+            </a>
             {data.token.pairAddress && (
               <a
                 href={`https://dexscreener.com/${data.token.chain.toLowerCase()}/${data.token.pairAddress}`}
@@ -1219,9 +1266,12 @@ export function BubbleMapsView() {
                               {node.id.length > 25 && (
                                 <a
                                   href={
-                                    data?.token.chain.toLowerCase() === "solana" || !node.id.startsWith("0x")
+                                    node.explorerUrl ||
+                                    (data?.token.chain.toLowerCase() === "solana" || !node.id.startsWith("0x")
                                       ? `https://solscan.io/account/${node.id}`
-                                      : `https://etherscan.io/address/${node.id}`
+                                      : data?.token.chain.toLowerCase() === "base"
+                                      ? `https://basescan.org/address/${node.id}`
+                                      : `https://etherscan.io/address/${node.id}`)
                                   }
                                   target="_blank"
                                   rel="noopener noreferrer"
@@ -1409,9 +1459,12 @@ export function BubbleMapsView() {
                   {selectedNode.id.length > 25 && (
                     <a
                       href={
-                        data?.token.chain.toLowerCase() === "solana" || !selectedNode.id.startsWith("0x")
+                        selectedNode.explorerUrl ||
+                        (data?.token.chain.toLowerCase() === "solana" || !selectedNode.id.startsWith("0x")
                           ? `https://solscan.io/account/${selectedNode.id}`
-                          : `https://etherscan.io/address/${selectedNode.id}`
+                          : data?.token.chain.toLowerCase() === "base"
+                          ? `https://basescan.org/address/${selectedNode.id}`
+                          : `https://etherscan.io/address/${selectedNode.id}`)
                       }
                       target="_blank"
                       rel="noopener noreferrer"
