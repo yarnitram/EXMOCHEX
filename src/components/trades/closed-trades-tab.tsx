@@ -29,6 +29,10 @@ interface Props {
   details?: Record<string, FuturesDetail | ContractDetail>;
   onEdit: (alert: TradeAlert) => void;
   onArchive: (alert: TradeAlert) => void;
+  onDelete: (alert: TradeAlert) => void;
+  selectedIds: Set<string>;
+  onToggleSelect: (id: string) => void;
+  onToggleSelectAll: () => void;
 }
 
 function formatSymbol(sym: string): string {
@@ -50,7 +54,16 @@ function formatDate(iso: string | null | undefined): string {
   }
 }
 
-export function ClosedTradesTab({ closedAlerts, details, onEdit, onArchive }: Props) {
+export function ClosedTradesTab({
+  closedAlerts,
+  details,
+  onEdit,
+  onArchive,
+  onDelete,
+  selectedIds,
+  onToggleSelect,
+  onToggleSelectAll,
+}: Props) {
   const [chartItem, setChartItem] = useState<TradeAlert | null>(null);
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [lightboxImages, setLightboxImages] = useState<string[]>([]);
@@ -68,11 +81,22 @@ export function ClosedTradesTab({ closedAlerts, details, onEdit, onArchive }: Pr
     );
   }
 
+  const allSelected = closedAlerts.length > 0 && closedAlerts.every((a) => selectedIds.has(a.id));
+
   return (
     <div className="overflow-x-auto rounded-xl hairline bg-panel/40 striped">
       <table className="w-full text-left text-xs">
         <thead className="hairline-b bg-panel-soft/60 font-mono text-[10px] uppercase text-muted tracking-wider">
           <tr>
+            <th className="w-8 py-3 px-3 text-center">
+              <input
+                type="checkbox"
+                aria-label="Select all closed trades"
+                className="accent-accent rounded cursor-pointer"
+                checked={allSelected}
+                onChange={onToggleSelectAll}
+              />
+            </th>
             <th className="py-3 px-4">Coin</th>
             <th className="py-3 px-4">Side</th>
             <th className="py-3 px-4">Leverage</th>
@@ -103,8 +127,6 @@ export function ClosedTradesTab({ closedAlerts, details, onEdit, onArchive }: Pr
             let pnlUsd = row.realized_pnl_usd;
             let pnlPct = row.realized_pnl_pct;
 
-            // If stored realized_pnl_pct was unleveraged or missing (stored with lev = 1 or null),
-            // and effectiveLeverage > 1, recalculate based on the effective leverage
             if (entry != null && row.exit_price != null && entry > 0) {
               const notional = margin * effectiveLeverage;
               const posSize = notional / entry;
@@ -134,8 +156,24 @@ export function ClosedTradesTab({ closedAlerts, details, onEdit, onArchive }: Pr
               ? [row.screenshot_url]
               : [];
 
+            const isSelected = selectedIds.has(row.id);
+
             return (
-              <tr key={row.id} className="hover:bg-panel-soft/50 transition-colors">
+              <tr
+                key={row.id}
+                className={`transition-colors ${
+                  isSelected ? "bg-accent/10" : "hover:bg-panel-soft/50"
+                }`}
+              >
+                <td className="w-8 py-3 px-3 text-center" onClick={(e) => e.stopPropagation()}>
+                  <input
+                    type="checkbox"
+                    aria-label={`Select ${formatSymbol(row.symbol)}`}
+                    className="accent-accent rounded cursor-pointer"
+                    checked={isSelected}
+                    onChange={() => onToggleSelect(row.id)}
+                  />
+                </td>
                 <td className="py-3 px-4 font-semibold text-text">
                   <div className="flex items-center gap-2">
                     <span>{formatSymbol(row.symbol)}</span>
@@ -246,6 +284,16 @@ export function ClosedTradesTab({ closedAlerts, details, onEdit, onArchive }: Pr
                         <polyline points="21 8 21 21 3 21 3 8" />
                         <rect x="1" y="3" width="22" height="5" />
                         <line x1="10" y1="12" x2="14" y2="12" />
+                      </svg>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onDelete(row)}
+                      title="Delete Trade"
+                      className="p-1 rounded text-muted hover:text-rose-400 hover:bg-rose-400/10 transition-colors cursor-pointer"
+                    >
+                      <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2M10 11v6M14 11v6" />
                       </svg>
                     </button>
                   </div>

@@ -28,6 +28,9 @@ interface Props {
   onEdit: (alert: ArchivedTradeAlert) => void;
   onRestore: (alert: ArchivedTradeAlert) => void;
   onDeletePermanent: (alert: ArchivedTradeAlert) => void;
+  selectedIds: Set<string>;
+  onToggleSelect: (id: string) => void;
+  onToggleSelectAll: () => void;
 }
 
 function formatSymbol(sym: string): string {
@@ -54,6 +57,9 @@ export function ArchivedTradesTab({
   onEdit,
   onRestore,
   onDeletePermanent,
+  selectedIds,
+  onToggleSelect,
+  onToggleSelectAll,
 }: Props) {
   const [chartItem, setChartItem] = useState<ArchivedTradeAlert | null>(null);
   const [lightboxOpen, setLightboxOpen] = useState(false);
@@ -72,11 +78,22 @@ export function ArchivedTradesTab({
     );
   }
 
+  const allSelected = archivedAlerts.length > 0 && archivedAlerts.every((a) => selectedIds.has(a.id));
+
   return (
     <div className="overflow-x-auto rounded-xl hairline bg-panel/40 striped">
       <table className="w-full text-left text-xs">
         <thead className="hairline-b bg-panel-soft/60 font-mono text-[10px] uppercase text-muted tracking-wider">
           <tr>
+            <th className="w-8 py-3 px-3 text-center">
+              <input
+                type="checkbox"
+                aria-label="Select all archived trades"
+                className="accent-accent rounded cursor-pointer"
+                checked={allSelected}
+                onChange={onToggleSelectAll}
+              />
+            </th>
             <th className="py-3 px-4">Coin</th>
             <th className="py-3 px-4">Side</th>
             <th className="py-3 px-4">Status at Archive</th>
@@ -100,8 +117,24 @@ export function ArchivedTradesTab({
               ? [row.screenshot_url]
               : [];
 
+            const isSelected = selectedIds.has(row.id);
+
             return (
-              <tr key={row.id} className="hover:bg-panel-soft/50 transition-colors">
+              <tr
+                key={row.id}
+                className={`transition-colors ${
+                  isSelected ? "bg-accent/10" : "hover:bg-panel-soft/50"
+                }`}
+              >
+                <td className="w-8 py-3 px-3 text-center" onClick={(e) => e.stopPropagation()}>
+                  <input
+                    type="checkbox"
+                    aria-label={`Select ${formatSymbol(row.symbol)}`}
+                    className="accent-accent rounded cursor-pointer"
+                    checked={isSelected}
+                    onChange={() => onToggleSelect(row.id)}
+                  />
+                </td>
                 <td className="py-3 px-4 font-semibold text-text">
                   <div className="flex items-center gap-2">
                     <span>{formatSymbol(row.symbol)}</span>

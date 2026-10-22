@@ -309,7 +309,18 @@ export function TradesClient({ initialAlerts, refreshIntervalSec = 10 }: Props) 
   // Modals & Action states
   const [editing, setEditing] = useState<TradeAlert | ArchivedTradeAlert | null>(null);
   const [editingIsArchived, setEditingIsArchived] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState<TradeAlert | null>(null);
+  type ConfirmDeleteItem = {
+    id: string;
+    symbol: string;
+    isArchived: boolean;
+  };
+
+  const [confirmDelete, setConfirmDelete] = useState<ConfirmDeleteItem | null>(null);
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
+  const [isBulkArchiving, setIsBulkArchiving] = useState(false);
+  const [isBulkRestoring, setIsBulkRestoring] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [manualModalOpen, setManualModalOpen] = useState(false);
   const [calcModalOpen, setCalcModalOpen] = useState(false);
   const [closingAlert, setClosingAlert] = useState<TradeAlert | null>(null);
@@ -651,31 +662,200 @@ export function TradesClient({ initialAlerts, refreshIntervalSec = 10 }: Props) 
     }
   }
 
-  async function deleteArchivedPermanent(archivedAlert: ArchivedTradeAlert) {
+  function handleTabChange(tab: "active" | "closed" | "archive") {
+    setActiveTab(tab);
+    setSelectedIds(new Set());
+    setConfirmBulkDelete(false);
+  }
+
+  function handleToggleSelect(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function handleToggleSelectAllActivePage() {
+    const pageIds = pageAlerts.map((a) => a.id);
+    const allPageSelected = pageIds.length > 0 && pageIds.every((id) => selectedIds.has(id));
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (allPageSelected) {
+        for (const id of pageIds) next.delete(id);
+      } else {
+        for (const id of pageIds) next.add(id);
+      }
+      return next;
+    });
+  }
+
+  function handleToggleSelectAllClosed() {
+    const allClosedIds = closedAlerts.map((a) => a.id);
+    const allSelected = allClosedIds.length > 0 && allClosedIds.every((id) => selectedIds.has(id));
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (allSelected) {
+        for (const id of allClosedIds) next.delete(id);
+      } else {
+        for (const id of allClosedIds) next.add(id);
+      }
+      return next;
+    });
+  }
+
+  function handleToggleSelectAllArchived() {
+    const allArchivedIds = archivedAlerts.map((a) => a.id);
+    const allSelected = allArchivedIds.length > 0 && allArchivedIds.every((id) => selectedIds.has(id));
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (allSelected) {
+        for (const id of allArchivedIds) next.delete(id);
+      } else {
+        for (const id of allArchivedIds) next.add(id);
+      }
+      return next;
+    });
+  }
+
+  const selectedSymbols = useMemo(() => {
+    if (selectedIds.size === 0) return [];
+    if (activeTab === "archive") {
+      return archivedAlerts.filter((a) => selectedIds.has(a.id)).map((a) => a.symbol);
+    }
+    return alerts.filter((a) => selectedIds.has(a.id)).map((a) => a.symbol);
+  }, [selectedIds, activeTab, archivedAlerts, alerts]);
+
+  async function executeSingleDelete(item: ConfirmDeleteItem) {
+    setConfirmDelete(null);
     try {
-      const res = await fetch(`/api/archived-trades/${archivedAlert.id}`, {
-        method: "DELETE",
-      });
-      if (!res.ok) throw new Error("Failed to delete archived trade");
-      setArchivedAlerts((prev) => prev.filter((a) => a.id !== archivedAlert.id));
-      setNotice("Trade permanently deleted.");
+      if (item.isArchived) {
+        const res = await fetch(`/api/archived-trades/${item.id}`, { method: "DELETE" });
+        if (!res.ok) {
+          const data = await res.json().catch(() => null);
+          throw new Error(data?.error || "Delete failed");
+        }
+        setArchivedAlerts((prev) => prev.filter((a) => a.id !== item.id));
+        setSelectedIds((prev) => {
+          const next = new Set(prev);
+          next.delete(item.id);
+          return next;
+        });
+        setNotice(`Permanently deleted ${cleanSymbol(item.symbol)}.`);
+      } else {
+        const res = await fetch(`/api/trade-alerts/${item.id}`, { method: "DELETE" });
+        if (!res.ok) {
+          const data = await res.json().catch(() => null);
+          throw new Error(data?.error || "Delete failed");
+        }
+        setAlerts((prev) => prev.filter((a) => a.id !== item.id));
+        setSelectedIds((prev) => {
+          const next = new Set(prev);
+          next.delete(item.id);
+          return next;
+        });
+        setNotice(`Deleted trade ${cleanSymbol(item.symbol)}.`);
+      }
     } catch (err: unknown) {
-      setNotice(err instanceof Error ? err.message : "Error deleting archived trade");
+      setNotice(err instanceof Error ? err.message : "Delete failed");
     }
   }
 
-  async function deleteTrade(id: string) {
-    setConfirmDelete(null);
+  async function handleBulkDelete() {
+    if (selectedIds.size === 0) return;
+    setIsBulkDeleting(true);
+    const ids = Array.from(selectedIds);
+    const count = ids.length;
+
     try {
-      const res = await fetch(`/api/trade-alerts/${id}`, { method: "DELETE" });
+      if (activeTab === "archive") {
+        const res = await fetch("/api/archived-trades/bulk-delete", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ids }),
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => null);
+          throw new Error(data?.error || "Bulk delete failed");
+        }
+        setArchivedAlerts((prev) => prev.filter((a) => !selectedIds.has(a.id)));
+        setSelectedIds(new Set());
+        setConfirmBulkDelete(false);
+        setNotice(`Permanently deleted ${count} archived trade${count > 1 ? "s" : ""}.`);
+      } else {
+        const res = await fetch("/api/trade-alerts/bulk-delete", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ids }),
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => null);
+          throw new Error(data?.error || "Bulk delete failed");
+        }
+        setAlerts((prev) => prev.filter((a) => !selectedIds.has(a.id)));
+        setSelectedIds(new Set());
+        setConfirmBulkDelete(false);
+        setNotice(`Permanently deleted ${count} trade${count > 1 ? "s" : ""}.`);
+      }
+    } catch (err: unknown) {
+      setNotice(err instanceof Error ? err.message : "Bulk delete failed");
+    } finally {
+      setIsBulkDeleting(false);
+    }
+  }
+
+  async function handleBulkArchive() {
+    if (selectedIds.size === 0) return;
+    setIsBulkArchiving(true);
+    const ids = Array.from(selectedIds);
+    const count = ids.length;
+
+    try {
+      const res = await fetch("/api/archived-trades", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ trade_alert_ids: ids }),
+      });
       if (!res.ok) {
         const data = await res.json().catch(() => null);
-        throw new Error(data?.error || "Delete failed");
+        throw new Error(data?.error || "Bulk archive failed");
       }
-      setAlerts((prev) => prev.filter((a) => a.id !== id));
-      setNotice("Trade deleted.");
-    } catch (err) {
-      setNotice((err as Error).message);
+      setAlerts((prev) => prev.filter((a) => !selectedIds.has(a.id)));
+      setSelectedIds(new Set());
+      setNotice(`Archived ${count} trade${count > 1 ? "s" : ""}.`);
+      if (activeTab === "archive") fetchArchived();
+    } catch (err: unknown) {
+      setNotice(err instanceof Error ? err.message : "Bulk archive failed");
+    } finally {
+      setIsBulkArchiving(false);
+    }
+  }
+
+  async function handleBulkRestore() {
+    if (selectedIds.size === 0) return;
+    setIsBulkRestoring(true);
+    const ids = Array.from(selectedIds);
+    const count = ids.length;
+
+    try {
+      const res = await fetch("/api/archived-trades/bulk-restore", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.error || "Bulk restore failed");
+      }
+      setArchivedAlerts((prev) => prev.filter((a) => !selectedIds.has(a.id)));
+      setSelectedIds(new Set());
+      await refreshAllAlerts();
+      setNotice(`Restored ${count} trade${count > 1 ? "s" : ""}.`);
+    } catch (err: unknown) {
+      setNotice(err instanceof Error ? err.message : "Bulk restore failed");
+    } finally {
+      setIsBulkRestoring(false);
     }
   }
 
@@ -722,7 +902,7 @@ export function TradesClient({ initialAlerts, refreshIntervalSec = 10 }: Props) 
       <div className="flex items-center gap-1 border-b border-line pb-0 font-mono text-xs">
         <button
           type="button"
-          onClick={() => setActiveTab("active")}
+          onClick={() => handleTabChange("active")}
           className={`px-3 py-2 border-b-2 font-medium transition-colors cursor-pointer flex items-center gap-2 ${
             activeTab === "active"
               ? "border-accent text-accent font-semibold"
@@ -736,7 +916,7 @@ export function TradesClient({ initialAlerts, refreshIntervalSec = 10 }: Props) 
         </button>
         <button
           type="button"
-          onClick={() => setActiveTab("closed")}
+          onClick={() => handleTabChange("closed")}
           className={`px-3 py-2 border-b-2 font-medium transition-colors cursor-pointer flex items-center gap-2 ${
             activeTab === "closed"
               ? "border-accent text-accent font-semibold"
@@ -750,7 +930,7 @@ export function TradesClient({ initialAlerts, refreshIntervalSec = 10 }: Props) 
         </button>
         <button
           type="button"
-          onClick={() => setActiveTab("archive")}
+          onClick={() => handleTabChange("archive")}
           className={`px-3 py-2 border-b-2 font-medium transition-colors cursor-pointer flex items-center gap-2 ${
             activeTab === "archive"
               ? "border-accent text-accent font-semibold"
@@ -763,6 +943,68 @@ export function TradesClient({ initialAlerts, refreshIntervalSec = 10 }: Props) 
           </span>
         </button>
       </div>
+
+      {/* Docked Bulk Selection Action Bar */}
+      {selectedIds.size > 0 && (
+        <div className="flex items-center justify-between flex-wrap gap-3 px-4 py-2.5 rounded-xl bg-panel border border-accent/40 shadow-sm animate-in fade-in duration-150">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-semibold text-accent text-xs">
+              ✓ {selectedIds.size} trade{selectedIds.size > 1 ? "s" : ""} selected
+            </span>
+            <button
+              type="button"
+              onClick={() => setSelectedIds(new Set())}
+              className="text-xs text-muted hover:text-text underline cursor-pointer ml-1"
+            >
+              Clear selection
+            </button>
+          </div>
+
+          <div className="flex items-center gap-2 flex-wrap">
+            {activeTab !== "archive" ? (
+              <button
+                type="button"
+                disabled={isBulkArchiving}
+                onClick={handleBulkArchive}
+                className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-amber-400/40 text-amber-400 hover:bg-amber-400/10 flex items-center gap-1.5 cursor-pointer disabled:opacity-50 transition-colors"
+                title="Archive selected trades"
+              >
+                <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="21 8 21 21 3 21 3 8" />
+                  <rect x="1" y="3" width="22" height="5" />
+                  <line x1="10" y1="12" x2="14" y2="12" />
+                </svg>
+                <span>{isBulkArchiving ? "Archiving…" : `Archive Selected (${selectedIds.size})`}</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                disabled={isBulkRestoring}
+                onClick={handleBulkRestore}
+                className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-amber-400/40 text-amber-400 hover:bg-amber-400/10 flex items-center gap-1.5 cursor-pointer disabled:opacity-50 transition-colors"
+                title="Restore selected trades"
+              >
+                <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M8 7L3 12L8 17M3 12H21M16 7L21 12L16 17" />
+                </svg>
+                <span>{isBulkRestoring ? "Restoring…" : `Restore Selected (${selectedIds.size})`}</span>
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={() => setConfirmBulkDelete(true)}
+              className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-loss/40 text-loss hover:bg-loss/10 flex items-center gap-1.5 cursor-pointer transition-colors"
+              title="Permanently delete selected trades"
+            >
+              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2M10 11v6M14 11v6" />
+              </svg>
+              <span>Delete Selected ({selectedIds.size})</span>
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Tab Contents */}
       {activeTab === "active" && (
@@ -909,6 +1151,15 @@ export function TradesClient({ initialAlerts, refreshIntervalSec = 10 }: Props) 
                 <table className="w-full text-sm border-collapse min-w-[1240px]">
                   <thead>
                     <tr className="hairline-b bg-panel-soft/60 font-mono text-[10px] uppercase text-muted tracking-wider">
+                      <th className="w-8 px-2 py-2 text-center">
+                        <input
+                          type="checkbox"
+                          aria-label="Select all active page trades"
+                          className="accent-accent rounded cursor-pointer"
+                          checked={pageAlerts.length > 0 && pageAlerts.every((a) => selectedIds.has(a.id))}
+                          onChange={handleToggleSelectAllActivePage}
+                        />
+                      </th>
                       <th className="px-3 py-2 text-left">Coin</th>
                       {colVisible("position") && <th className="px-2 py-1.5 text-left">Position</th>}
                       {colVisible("leverage") && <th className="px-2 py-1.5 text-left">Leverage</th>}
@@ -928,7 +1179,16 @@ export function TradesClient({ initialAlerts, refreshIntervalSec = 10 }: Props) 
                     {pageAlerts.map((a) => {
                       const sym = a.symbol.toUpperCase();
                       return (
-                        <tr key={a.id} className="hairline-b hover:bg-panel-soft/50 transition-colors">
+                        <tr key={a.id} className={`hairline-b transition-colors ${selectedIds.has(a.id) ? "bg-accent/10" : "hover:bg-panel-soft/50"}`}>
+                          <td className="w-8 px-2 py-2.5 text-center" onClick={(e) => e.stopPropagation()}>
+                            <input
+                              type="checkbox"
+                              aria-label={`Select ${cleanSymbol(sym)}`}
+                              className="accent-accent rounded cursor-pointer"
+                              checked={selectedIds.has(a.id)}
+                              onChange={() => handleToggleSelect(a.id)}
+                            />
+                          </td>
                           <td className="px-3 py-2.5">
                             <div className="flex items-center gap-2">
                               <span className="flex size-5 shrink-0 items-center justify-center overflow-hidden rounded-full">
@@ -1136,6 +1396,16 @@ export function TradesClient({ initialAlerts, refreshIntervalSec = 10 }: Props) 
                                   <line x1="10" y1="12" x2="14" y2="12" />
                                 </svg>
                               </button>
+                              <button
+                                type="button"
+                                onClick={() => setConfirmDelete({ id: a.id, symbol: a.symbol, isArchived: false })}
+                                className="p-1 rounded text-muted hover:text-rose-400 hover:bg-rose-400/10 transition-colors cursor-pointer"
+                                title="Delete trade"
+                              >
+                                <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                  <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2M10 11v6M14 11v6" />
+                                </svg>
+                              </button>
                             </div>
                           </td>
                         </tr>
@@ -1181,6 +1451,10 @@ export function TradesClient({ initialAlerts, refreshIntervalSec = 10 }: Props) 
             setEditingIsArchived(false);
           }}
           onArchive={(alert) => archiveTradeAlert(alert.id)}
+          onDelete={(alert) => setConfirmDelete({ id: alert.id, symbol: alert.symbol, isArchived: false })}
+          selectedIds={selectedIds}
+          onToggleSelect={handleToggleSelect}
+          onToggleSelectAll={handleToggleSelectAllClosed}
         />
       )}
 
@@ -1192,7 +1466,10 @@ export function TradesClient({ initialAlerts, refreshIntervalSec = 10 }: Props) 
             setEditingIsArchived(true);
           }}
           onRestore={restoreArchivedTradeAlert}
-          onDeletePermanent={deleteArchivedPermanent}
+          onDeletePermanent={(alert) => setConfirmDelete({ id: alert.id, symbol: alert.symbol, isArchived: true })}
+          selectedIds={selectedIds}
+          onToggleSelect={handleToggleSelect}
+          onToggleSelectAll={handleToggleSelectAllArchived}
         />
       )}
 
@@ -1271,27 +1548,96 @@ export function TradesClient({ initialAlerts, refreshIntervalSec = 10 }: Props) 
           title="Delete Trade Alert"
         >
           <div className="space-y-4">
-            <p className="text-xs text-muted">
-              Are you sure you want to delete the trade alert for{" "}
-              <span className="font-semibold text-text">
-                {cleanSymbol(confirmDelete.symbol)}
-              </span>
-              ? This action cannot be undone.
-            </p>
+            <div className="flex items-start gap-3 p-3 rounded-lg bg-loss/10 border border-loss/20 text-loss text-xs">
+              <svg className="w-5 h-5 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="12" cy="12" r="10" />
+                <line x1="12" y1="8" x2="12" y2="12" />
+                <line x1="12" y1="16" x2="12.01" y2="16" />
+              </svg>
+              <div>
+                <p className="font-semibold text-text">Confirm Permanent Deletion</p>
+                <p className="text-muted mt-0.5">
+                  Are you sure you want to permanently delete the trade alert for{" "}
+                  <span className="font-semibold text-text">
+                    {cleanSymbol(confirmDelete.symbol)}
+                  </span>
+                  ? This action cannot be undone.
+                </p>
+              </div>
+            </div>
             <div className="flex items-center justify-end gap-2 pt-2 border-t border-line">
               <button
                 type="button"
                 onClick={() => setConfirmDelete(null)}
-                className="px-4 py-2 rounded-lg text-xs font-medium text-muted hover:text-text transition-colors"
+                className="px-4 py-2 rounded-lg text-xs font-medium text-muted hover:text-text transition-colors cursor-pointer"
               >
                 Cancel
               </button>
               <button
                 type="button"
-                onClick={() => deleteTrade(confirmDelete.id)}
+                onClick={() => executeSingleDelete(confirmDelete)}
                 className="px-4 py-2 rounded-lg bg-loss hover:brightness-110 text-white text-xs font-semibold transition-all cursor-pointer"
               >
-                Delete
+                Delete Trade
+              </button>
+            </div>
+          </div>
+        </ModalShell>
+      )}
+
+      {confirmBulkDelete && (
+        <ModalShell
+          onClose={() => setConfirmBulkDelete(false)}
+          title={`Delete ${selectedIds.size} Trades`}
+        >
+          <div className="space-y-4">
+            <div className="flex items-start gap-3 p-3 rounded-lg bg-loss/10 border border-loss/20 text-loss text-xs">
+              <svg className="w-5 h-5 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="12" cy="12" r="10" />
+                <line x1="12" y1="8" x2="12" y2="12" />
+                <line x1="12" y1="16" x2="12.01" y2="16" />
+              </svg>
+              <div>
+                <p className="font-semibold text-text">Confirm Bulk Deletion</p>
+                <p className="text-muted mt-0.5">
+                  Are you sure you want to permanently delete{" "}
+                  <span className="font-semibold text-text">
+                    {selectedIds.size} selected trade{selectedIds.size > 1 ? "s" : ""}
+                  </span>
+                  ? This action cannot be undone.
+                </p>
+              </div>
+            </div>
+
+            <div className="max-h-32 overflow-y-auto p-2.5 rounded-lg bg-panel-soft/60 border border-line flex flex-wrap gap-1.5">
+              {selectedSymbols.slice(0, 15).map((s, idx) => (
+                <span key={idx} className="px-2 py-0.5 rounded bg-panel border border-line font-mono text-[11px] text-text">
+                  {cleanSymbol(s)}
+                </span>
+              ))}
+              {selectedSymbols.length > 15 && (
+                <span className="px-2 py-0.5 text-muted text-[11px]">
+                  +{selectedSymbols.length - 15} more
+                </span>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-line">
+              <button
+                type="button"
+                disabled={isBulkDeleting}
+                onClick={() => setConfirmBulkDelete(false)}
+                className="px-4 py-2 rounded-lg text-xs font-medium text-muted hover:text-text transition-colors cursor-pointer disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isBulkDeleting}
+                onClick={handleBulkDelete}
+                className="px-4 py-2 rounded-lg bg-loss hover:brightness-110 text-white text-xs font-semibold transition-all cursor-pointer disabled:opacity-50"
+              >
+                {isBulkDeleting ? "Deleting…" : `Delete ${selectedIds.size} Trade${selectedIds.size > 1 ? "s" : ""}`}
               </button>
             </div>
           </div>
