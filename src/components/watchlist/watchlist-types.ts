@@ -29,7 +29,8 @@ export type SortField =
   | "change"
   | "volume"
   | "price"
-  | "trigger";
+  | "trigger"
+  | "daysActive";
 
 export interface SortConfig {
   field: SortField;
@@ -50,6 +51,8 @@ export const SORT_OPTIONS: { value: SortConfig; label: string }[] = [
   { value: { field: "price", dir: "asc" }, label: "Last price (low → high)" },
   { value: { field: "trigger", dir: "desc" }, label: "Trigger (high → low)" },
   { value: { field: "trigger", dir: "asc" }, label: "Trigger (low → high)" },
+  { value: { field: "daysActive", dir: "desc" }, label: "Days active: oldest first" },
+  { value: { field: "daysActive", dir: "asc" }, label: "Days active: newest first" },
 ];
 
 export function sortConfigKey(c: SortConfig): string {
@@ -67,6 +70,7 @@ export type ColKey =
   | "trigger"
   | "plan"
   | "orderType"
+  | "daysActive"
   | "triggerAdded"
   | "firedAt"
   | "status";
@@ -79,6 +83,7 @@ export const COLUMNS: { key: ColKey; label: string }[] = [
   { key: "trigger", label: "Trigger" },
   { key: "plan", label: "EP / SL / TP" },
   { key: "orderType", label: "Order type" },
+  { key: "daysActive", label: "Days Active" },
   { key: "triggerAdded", label: "Trigger added" },
   { key: "firedAt", label: "Fired at" },
   { key: "status", label: "Status" },
@@ -92,9 +97,10 @@ export const DEFAULT_COLS: Record<ColKey, boolean> = {
   trigger: true,
   plan: true,
   orderType: true,
-  triggerAdded: true,
-  firedAt: true,
-  status: true,
+  daysActive: true,
+  triggerAdded: false,
+  firedAt: false,
+  status: false,
 };
 
 // ---- Order-type labels ----
@@ -108,9 +114,7 @@ export const ORDER_TYPE_LABELS: Record<string, string> = {
 // ---- localStorage helpers ----
 
 const SORT_KEY = "mochex:watchlist-sort";
-/** Legacy single-toggle key; read during migration only. */
-const DETAILS_COLS_KEY = "mochex:watchlist-details-cols";
-const COLS_KEY = "mochex:watchlist-cols";
+const COLS_KEY = "mochex:watchlist-cols-v2";
 
 export function loadSort(): SortConfig {
   try {
@@ -142,16 +146,6 @@ export function loadCols(): Record<ColKey, boolean> {
     if (raw) {
       const parsed = JSON.parse(raw) as Partial<Record<ColKey, boolean>>;
       return { ...DEFAULT_COLS, ...parsed };
-    }
-    // Migrate the old single details toggle: if it hid the details columns,
-    // carry that over; otherwise start with everything visible.
-    if (localStorage.getItem(DETAILS_COLS_KEY) === "0") {
-      return {
-        ...DEFAULT_COLS,
-        orderType: false,
-        triggerAdded: false,
-        firedAt: false,
-      };
     }
   } catch {
     /* ignore */

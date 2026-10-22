@@ -1,5 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { money, percent, r, signed, cleanSymbol, fmtPx } from "@/lib/format";
+import {
+  money,
+  percent,
+  r,
+  signed,
+  cleanSymbol,
+  fmtPx,
+  formatDaysActive,
+} from "@/lib/format";
 
 describe("format - Display Formatters & Symbol Cleaners", () => {
   describe("money", () => {
@@ -61,6 +69,38 @@ describe("format - Display Formatters & Symbol Cleaners", () => {
       expect(fmtPx(4.567)).toBe("4.567");
       // < 1: 6 decimals max
       expect(fmtPx(0.000123)).toBe("0.000123");
+    });
+  });
+
+  describe("formatDaysActive", () => {
+    const fixedNow = new Date("2026-10-22T12:00:00Z").getTime();
+
+    it("formats items added today as 'Today'", () => {
+      const addedSameDay = "2026-10-22T08:00:00Z";
+      const res = formatDaysActive(addedSameDay, fixedNow);
+      expect(res.text).toBe("Today");
+      expect(res.days).toBe(0);
+      expect(res.fullDate).toContain("Oct 22, 2026");
+    });
+
+    it("formats items added 1 day ago as '1d'", () => {
+      const addedYesterday = "2026-10-21T10:00:00Z";
+      const res = formatDaysActive(addedYesterday, fixedNow);
+      expect(res.text).toBe("1d");
+      expect(res.days).toBe(1);
+    });
+
+    it("formats items added multiple days ago correctly", () => {
+      const added7DaysAgo = "2026-10-15T12:00:00Z";
+      const res = formatDaysActive(added7DaysAgo, fixedNow);
+      expect(res.text).toBe("7d");
+      expect(res.days).toBe(7);
+    });
+
+    it("handles null, undefined, and invalid date strings gracefully", () => {
+      expect(formatDaysActive(null, fixedNow)).toEqual({ text: "—", fullDate: "", days: -1 });
+      expect(formatDaysActive(undefined, fixedNow)).toEqual({ text: "—", fullDate: "", days: -1 });
+      expect(formatDaysActive("invalid-date", fixedNow)).toEqual({ text: "—", fullDate: "", days: -1 });
     });
   });
 });

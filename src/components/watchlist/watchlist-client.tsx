@@ -171,6 +171,12 @@ export function WatchlistClient({
           const bV = b.trigger_price ?? Number.NEGATIVE_INFINITY;
           return (aV - bV) * dir;
         }
+        case "daysActive": {
+          const aTime = a.added_at ? new Date(a.added_at).getTime() : 0;
+          const bTime = b.added_at ? new Date(b.added_at).getTime() : 0;
+          const diff = (aTime - bTime) * (sort.dir === "asc" ? -1 : 1);
+          return diff !== 0 ? diff : aSym.localeCompare(bSym);
+        }
         default:
           return 0;
       }

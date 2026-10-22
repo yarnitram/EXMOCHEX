@@ -93,6 +93,9 @@ export function WatchlistTable({
               {colVisible("orderType") && (
                 <th className="px-3 py-2.5 text-right">Order type</th>
               )}
+              {colVisible("daysActive") && (
+                <th className="px-3 py-2.5 text-center">Days Active</th>
+              )}
               {colVisible("triggerAdded") && (
                 <th className="px-3 py-2.5 text-center">Trigger added</th>
               )}

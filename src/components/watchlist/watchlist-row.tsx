@@ -8,6 +8,7 @@ import {
   fmtPlanPx,
   fmtPx,
   compact,
+  formatDaysActive,
 } from "@/lib/format";
 import type { ColKey, Ticker } from "./watchlist-types";
 import { getOrderTypeLabel } from "@/lib/watchlist-utils";
@@ -105,6 +106,7 @@ export function WatchlistRow({
 }: WatchlistRowProps) {
   const [isChartOpen, setIsChartOpen] = useState(false);
   const [lightboxOpen, setLightboxOpen] = useState(false);
+  const daysInfo = formatDaysActive(item.added_at);
   const sym = item.symbol.toUpperCase();
   const label = cleanSymbol(sym);
   const colVisible = (key: ColKey) => cols[key] !== false;
@@ -280,6 +282,18 @@ export function WatchlistRow({
             ) : (
               <span className="text-muted">—</span>
             )}
+          </td>
+        )}
+
+        {/* Days Active */}
+        {colVisible("daysActive") && (
+          <td className="px-3 py-2.5 text-center">
+            <span
+              className="px-2 py-0.5 rounded font-mono text-[11px] font-medium bg-panel-soft text-text border border-line cursor-help inline-block"
+              title={daysInfo.fullDate ? `Added on ${daysInfo.fullDate}` : undefined}
+            >
+              {daysInfo.text}
+            </span>
           </td>
         )}
 

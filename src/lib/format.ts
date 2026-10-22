@@ -94,3 +94,33 @@ export function mexcChartUrl(symbol: string): string {
   const formattedSymbol = clean.includes("_") ? clean : `${clean}_USDT`;
   return `https://www.mexc.co/futures/${formattedSymbol}`;
 }
+
+/**
+ * Calculate and format days active from an added_at ISO date string.
+ * Returns text like "Today" (if < 24h or same day) or "1d", "5d", "14d",
+ * and a full formatted date for the hover tooltip.
+ */
+export function formatDaysActive(
+  addedAt: string | null | undefined,
+  nowMs: number = Date.now()
+): { text: string; fullDate: string; days: number } {
+  if (!addedAt) return { text: "—", fullDate: "", days: -1 };
+  const added = new Date(addedAt);
+  const time = added.getTime();
+  if (isNaN(time)) return { text: "—", fullDate: "", days: -1 };
+
+  const diffMs = nowMs - time;
+  const days = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+  const fullDate = added.toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+  if (days <= 0) {
+    return { text: "Today", fullDate, days: 0 };
+  }
+  return { text: `${days}d`, fullDate, days };
+}

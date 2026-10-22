@@ -1,6 +1,6 @@
 import type { WatchlistItem, TriggeredWatchlistItem, ArchivedWatchlistItem } from "./types";
 import { deriveTradeSide } from "./types";
-import { cleanSymbol } from "./format";
+import { cleanSymbol, formatDaysActive } from "./format";
 import { getOrderTypeLabel, calculateRiskRewardRatio } from "./watchlist-utils";
 import type { Ticker } from "@/components/watchlist/watchlist-types";
 
@@ -75,6 +75,7 @@ export function exportWatchlistToCsv(
     "Coin",
     "Position",
     "Order Type",
+    "Days Active",
     "Trigger Price",
     "Trigger Condition",
     "Entry Price",
@@ -100,6 +101,7 @@ export function exportWatchlistToCsv(
     const side = deriveTradeSide(item);
     const posStr = side === "long" ? "LONG" : side === "short" ? "SHORT" : "—";
     const rr = calculateRiskRewardRatio(item.entry_price, item.stop_loss, item.take_profit, side);
+    const daysInfo = formatDaysActive(item.added_at);
 
     const triggerCondition =
       item.trigger_direction === "below"
@@ -124,6 +126,7 @@ export function exportWatchlistToCsv(
       escapeCsv(cleanSymbol(item.symbol)),
       escapeCsv(posStr),
       escapeCsv(getOrderTypeLabel(item.order_type)),
+      escapeCsv(daysInfo.text),
       escapeCsv(item.trigger_price ?? ""),
       escapeCsv(triggerCondition),
       escapeCsv(item.entry_price ?? ""),
