@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { crossed, hitDirectionFor, detectHits, type SlTpCandidate } from "@/lib/sl-tp";
-import { deriveTradeSide, sideForTrigger } from "@/lib/types";
+import { deriveTradeSide, sideForTrigger, deriveSmartTriggerDirection } from "@/lib/types";
 import { calculateTradePnl } from "@/lib/trade-calc";
 
 describe("sl-tp & trade-calc - Level Crossing & Position Math", () => {
@@ -152,4 +152,28 @@ describe("sl-tp & trade-calc - Level Crossing & Position Math", () => {
       expect(res.positionSize).toBeNull();
     });
   });
+
+  describe("deriveSmartTriggerDirection", () => {
+    it("returns 'above' when current market price is below the target entry price", () => {
+      // Example from user case: AERO market price is 0.8189, entry is 0.8870
+      expect(deriveSmartTriggerDirection(0.887, 0.8189, "long")).toBe("above");
+      expect(deriveSmartTriggerDirection(0.887, 0.8189, "short")).toBe("above");
+      expect(deriveSmartTriggerDirection(100, 90, "long")).toBe("above");
+    });
+
+    it("returns 'below' when current market price is above the target entry price", () => {
+      // Example: Buying a pullback at 63000 when market price is 65000
+      expect(deriveSmartTriggerDirection(63000, 65000, "long")).toBe("below");
+      expect(deriveSmartTriggerDirection(63000, 65000, "short")).toBe("below");
+      expect(deriveSmartTriggerDirection(90, 100, "long")).toBe("below");
+    });
+
+    it("falls back to conventional position direction when price is identical or missing", () => {
+      expect(deriveSmartTriggerDirection(100, 100, "long")).toBe("below");
+      expect(deriveSmartTriggerDirection(100, 100, "short")).toBe("above");
+      expect(deriveSmartTriggerDirection(100, null, "long")).toBe("below");
+      expect(deriveSmartTriggerDirection(100, null, "short")).toBe("above");
+    });
+  });
+
 });

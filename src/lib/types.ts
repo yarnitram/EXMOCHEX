@@ -357,6 +357,32 @@ export function deriveTradeSide(candidate?: TradeSideCandidate | null): TradeSid
   return "long";
 }
 
+/**
+ * Automatically calculates the trigger direction ('above' | 'below') so that
+ * the current market price must travel to and hit the target price before triggering.
+ *
+ * - If current market price is below target: price must rise to hit it -> 'above' (price >= target)
+ * - If current market price is above target: price must drop to hit it -> 'below' (price <= target)
+ */
+export function deriveSmartTriggerDirection(
+  targetPrice: number | null | undefined,
+  currentMarketPrice: number | null | undefined,
+  position: "long" | "short" = "long"
+): "above" | "below" {
+  if (targetPrice == null || isNaN(targetPrice) || targetPrice <= 0) {
+    return position === "long" ? "below" : "above";
+  }
+  if (currentMarketPrice != null && !isNaN(currentMarketPrice) && currentMarketPrice > 0) {
+    if (currentMarketPrice < targetPrice) {
+      return "above";
+    }
+    if (currentMarketPrice > targetPrice) {
+      return "below";
+    }
+  }
+  return position === "long" ? "below" : "above";
+}
+
 export function sideForTrigger(
   direction: "above" | "below" | null | undefined,
   candidate?: TradeSideCandidate | null

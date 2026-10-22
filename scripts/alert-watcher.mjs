@@ -143,7 +143,7 @@ async function syncDatabaseState() {
   try {
     const [watchlist, trades, settingsRows] = await Promise.all([
       supabase(
-        "/rest/v1/watchlist_items?select=id,user_id,symbol,trigger_price,trigger_direction,entry_price,stop_loss,take_profit,order_type,notes,alert_fired,screenshot_url,screenshot_urls&alert_fired=eq.false"
+        "/rest/v1/watchlist_items?select=id,user_id,symbol,trigger_price,trigger_direction,entry_price,stop_loss,take_profit,order_type,notes,alert_fired,screenshot_url,screenshot_urls,trigger_created_at,added_at&alert_fired=eq.false"
       ),
       supabase(
         "/rest/v1/trade_alerts?select=id,user_id,symbol,trigger_direction,entry_price,stop_loss,take_profit,margin_usd,leverage,notes,sl_fired_at,tp_fired_at&or=(sl_fired_at.is.null,tp_fired_at.is.null)"
@@ -188,6 +188,18 @@ async function handlePriceTick(symbol, price) {
   const activeForSymbol = inMemoryWatchlist.filter((i) => i.symbol.toUpperCase() === symbol.toUpperCase());
   for (const item of activeForSymbol) {
     const trigger = Number(item.trigger_price);
+
+    // Active crossing guard: Limit and Trigger Limit setups have a 4s grace window upon creation
+    if (item.order_type !== "market") {
+      const createdTime = item.trigger_created_at || item.added_at;
+      if (createdTime) {
+        const ageMs = Date.now() - new Date(createdTime).getTime();
+        if (ageMs < 4000) {
+          continue;
+        }
+      }
+    }
+
     const hit =
       item.trigger_direction === "below"
         ? price <= trigger

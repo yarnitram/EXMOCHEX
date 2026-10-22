@@ -269,8 +269,20 @@ export function WatchlistClient({
         if (i.alert_fired) return false;
         if (i.trigger_price == null || i.trigger_direction == null) return false;
         const t = live[i.symbol.toUpperCase()];
-        if (!t) return false;
+        if (!t || !t.lastPrice || t.lastPrice <= 0) return false;
         const tp = i.trigger_price;
+
+        // Active crossing guard: newly created Limit and Trigger Limit setups must settle
+        if (i.order_type !== "market") {
+          const createdTime = i.trigger_created_at || i.added_at;
+          if (createdTime) {
+            const ageMs = Date.now() - new Date(createdTime).getTime();
+            if (ageMs < 4000) {
+              return false;
+            }
+          }
+        }
+
         if (i.trigger_direction === "above" && t.lastPrice >= tp) return true;
         if (i.trigger_direction === "below" && t.lastPrice <= tp) return true;
         return false;

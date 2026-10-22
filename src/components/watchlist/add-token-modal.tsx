@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ModalShell } from "@/components/ui/modal-shell";
 import type { OrderType, WatchlistItem } from "@/lib/types";
+import { deriveSmartTriggerDirection } from "@/lib/types";
 import { cleanSymbol, fmtPx, fmtPct } from "@/lib/format";
 import { ORDER_TYPE_LABELS } from "./watchlist-types";
 import { MultiScreenshotUploader } from "@/components/ui/multi-screenshot-uploader";
@@ -188,38 +189,42 @@ export function AddTokenModal({
     if (!entryPrice && t.lastPrice) {
       setEntryPrice(String(t.lastPrice));
     }
+    if (t.lastPrice) {
+      setTriggerDirection(deriveSmartTriggerDirection(t.lastPrice, t.lastPrice, position));
+    }
   }
 
   function handlePositionChange(newPos: "long" | "short") {
     setPosition(newPos);
+    const target = parseFloat(orderType === "trigger_limit" ? triggerPrice : entryPrice);
+    if (selectedToken?.lastPrice && !isNaN(target)) {
+      setTriggerDirection(deriveSmartTriggerDirection(target, selectedToken.lastPrice, newPos));
+    }
   }
 
   function handleTriggerPriceChange(val: string) {
     setTriggerPrice(val);
     const trig = parseFloat(val);
-    const last = selectedToken?.lastPrice;
-    if (!isNaN(trig) && last != null && last > 0) {
-      if (trig > last) {
-        setTriggerDirection("above");
-      } else if (trig < last) {
-        setTriggerDirection("below");
-      }
+    if (!isNaN(trig) && selectedToken?.lastPrice) {
+      setTriggerDirection(deriveSmartTriggerDirection(trig, selectedToken.lastPrice, position));
     }
   }
 
   function handleEntryChange(val: string) {
     setEntryPrice(val);
-    // Auto-sync trigger price to EP for Limit and Market order types
+    const ep = parseFloat(val);
     if (orderType === "limit" || orderType === "market") {
       setTriggerPrice(val);
+      if (!isNaN(ep) && selectedToken?.lastPrice) {
+        setTriggerDirection(deriveSmartTriggerDirection(ep, selectedToken.lastPrice, position));
+      }
     }
-    const ep = parseFloat(val);
     const sl = parseFloat(stopLoss);
     if (!isNaN(ep) && !isNaN(sl)) {
-      if (sl < ep) {
-        setPosition("long");
-      } else if (sl > ep) {
-        setPosition("short");
+      const newPos = sl < ep ? "long" : "short";
+      setPosition(newPos);
+      if (orderType === "limit" || orderType === "market") {
+        setTriggerDirection(deriveSmartTriggerDirection(ep, selectedToken?.lastPrice, newPos));
       }
     }
   }
@@ -229,10 +234,11 @@ export function AddTokenModal({
     const sl = parseFloat(val);
     const ep = parseFloat(entryPrice);
     if (!isNaN(sl) && !isNaN(ep)) {
-      if (sl < ep) {
-        setPosition("long");
-      } else if (sl > ep) {
-        setPosition("short");
+      const newPos = sl < ep ? "long" : "short";
+      setPosition(newPos);
+      const target = parseFloat(orderType === "trigger_limit" ? triggerPrice : entryPrice);
+      if (!isNaN(target) && selectedToken?.lastPrice) {
+        setTriggerDirection(deriveSmartTriggerDirection(target, selectedToken.lastPrice, newPos));
       }
     }
   }
@@ -314,10 +320,17 @@ export function AddTokenModal({
     setFormError(null);
     setSuccessBanner(null);
 
+    const targetForDirection = orderType === "trigger_limit" ? trigNum : ep;
+    const finalDirection = deriveSmartTriggerDirection(
+      targetForDirection,
+      selectedToken.lastPrice,
+      position
+    );
+
     const payload: AddSetupPayload = {
       symbol: selectedToken.symbol.toUpperCase(),
       trigger_price: trigNum,
-      trigger_direction: triggerDirection,
+      trigger_direction: finalDirection,
       order_type: orderType,
       entry_price: ep,
       stop_loss: sl,
@@ -775,6 +788,26 @@ export function AddTokenModal({
               {riskWarning && (
                 <div className="text-[11px] text-amber-400 font-mono">
                   {riskWarning}
+                </div>
+              )}
+
+              {/* Smart Trigger Arming Pill */}
+              {selectedToken.lastPrice > 0 && (entryPrice || triggerPrice) && (
+                <div className="p-2.5 rounded-xl bg-panel/60 border border-line flex flex-wrap items-center justify-between gap-2 text-xs animate-in fade-in duration-150">
+                  <div className="flex items-center gap-1.5 font-medium text-text">
+                    <span className="text-accent font-bold">🎯 Trigger Arming:</span>
+                    <span className="text-text font-semibold">
+                      {triggerDirection === "above"
+                        ? "Price must rise to or cross above (≥)"
+                        : "Price must drop to or cross below (≤)"}{" "}
+                      <span className="font-mono text-accent">
+                        ${orderType === "trigger_limit" ? triggerPrice : entryPrice}
+                      </span>
+                    </span>
+                  </div>
+                  <span className="font-mono text-muted text-[11px]">
+                    Current Market: ${fmtPx(selectedToken.lastPrice)}
+                  </span>
                 </div>
               )}
             </div>

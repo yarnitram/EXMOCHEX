@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { WatchlistItem, TriggeredWatchlistItem, ArchivedWatchlistItem, OrderType } from "@/lib/types";
+import { deriveSmartTriggerDirection } from "@/lib/types";
 import { ModalShell } from "@/components/ui/modal-shell";
 import { SetupRevisionTimeline } from "@/components/revisions/setup-revision-timeline";
 import { MultiScreenshotUploader } from "@/components/ui/multi-screenshot-uploader";
@@ -218,11 +219,17 @@ export function CoinDetailModal({ symbol, item, isReadOnly, onClose, onSaved }: 
       }
       const lastPrice = ticker?.lastPrice ?? null;
 
+      let effectiveDirection = triggerDirection;
+      if (orderType !== "market" && triggerPriceNum !== null && lastPrice !== null) {
+        effectiveDirection = deriveSmartTriggerDirection(triggerPriceNum, lastPrice, position);
+      }
+
+      // Limit and Trigger Limit orders must wait for price to hit target — NEVER fire immediately!
       let firedImmediately = false;
-      if (triggerPriceNum !== null && lastPrice !== null) {
-        if (triggerDirection === "below" && lastPrice <= triggerPriceNum) {
+      if (orderType === "market" && triggerPriceNum !== null && lastPrice !== null) {
+        if (effectiveDirection === "below" && lastPrice <= triggerPriceNum) {
           firedImmediately = true;
-        } else if (triggerDirection === "above" && lastPrice >= triggerPriceNum) {
+        } else if (effectiveDirection === "above" && lastPrice >= triggerPriceNum) {
           firedImmediately = true;
         }
       }
@@ -248,7 +255,7 @@ export function CoinDetailModal({ symbol, item, isReadOnly, onClose, onSaved }: 
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           trigger_price: triggerPriceNum,
-          trigger_direction: triggerDirection,
+          trigger_direction: effectiveDirection,
           order_type: orderType || null,
           entry_price: entry ? parseFloat(entry) : null,
           stop_loss: stopLoss ? parseFloat(stopLoss) : null,
