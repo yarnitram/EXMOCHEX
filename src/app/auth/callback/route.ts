@@ -48,6 +48,13 @@ export async function GET(request: Request) {
   const origin = getRequestOrigin(request);
   const code = requestUrl.searchParams.get("code");
   const next = requestUrl.searchParams.get("next") ?? "/watchlist";
+  const errorParam = requestUrl.searchParams.get("error");
+  const errorDescription = requestUrl.searchParams.get("error_description");
+
+  if (errorParam || errorDescription) {
+    const message = errorDescription || errorParam || "OAuth authentication failed.";
+    return NextResponse.redirect(`${origin}/login?error=${encodeURIComponent(message)}`);
+  }
 
   if (code) {
     const cookieStore = await cookies();
@@ -66,10 +73,13 @@ export async function GET(request: Request) {
         },
       },
     });
-    const { error } = await supabase.auth.exchangeCodeForSession(code);
-    if (!error) {
+    const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
+    if (!exchangeError) {
       return NextResponse.redirect(`${origin}${next}`);
     }
+    return NextResponse.redirect(
+      `${origin}/login?error=${encodeURIComponent(exchangeError.message)}`
+    );
   }
 
   // Redirect the user to an error page with an optional error description.

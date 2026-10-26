@@ -16,6 +16,10 @@ export async function proxy(request: NextRequest) {
     pathname.startsWith("/risk") ||
     pathname.startsWith("/watchlist") ||
     pathname.startsWith("/chart") ||
+    pathname.startsWith("/trades") ||
+    pathname.startsWith("/admin") ||
+    pathname.startsWith("/notifications") ||
+    pathname.startsWith("/shares") ||
     pathname.startsWith("/settings");
 
   const isAuthRoute = pathname.startsWith("/login");
@@ -28,10 +32,10 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  // Logged-in users visiting the login page are sent to the journal.
+  // Logged-in users visiting the login page are sent to the journal or requested route.
   if (isAuthRoute && isAuthed) {
     const url = request.nextUrl.clone();
-    url.pathname = nextPathname(request.nextUrl.searchParams.get("next")) || "/journal";
+    url.pathname = nextPathname(request.nextUrl.searchParams.get("next")) || "/watchlist";
     return NextResponse.redirect(url);
   }
 
@@ -50,6 +54,10 @@ export const config = {
     "/risk/:path*",
     "/watchlist/:path*",
     "/chart/:path*",
+    "/trades/:path*",
+    "/admin/:path*",
+    "/notifications/:path*",
+    "/shares/:path*",
     "/settings",
     "/login",
   ],

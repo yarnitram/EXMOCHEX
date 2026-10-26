@@ -1,22 +1,24 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
 type Mode = "signin" | "signup";
 
 export function LoginForm() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const next = searchParams.get("next") || "/watchlist";
 
   const [mode, setMode] = useState<Mode>("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const errorParam = searchParams.get("error");
   const [error, setError] = useState<string | null>(
-    searchParams.get("error") === "auth"
+    errorParam === "auth"
       ? "Authentication failed or was cancelled. Please try again."
+      : errorParam
+      ? decodeURIComponent(errorParam)
       : null
   );
   const [notice, setNotice] = useState<string | null>(null);
@@ -58,13 +60,13 @@ export function LoginForm() {
       email,
       password,
     });
-    setLoading(false);
     if (error) {
+      setLoading(false);
       setError(error.message);
       return;
     }
-    router.push(next);
-    router.refresh();
+    // Hard navigate to ensure newly established cookies are transmitted in the HTTP request header
+    window.location.href = next;
   }
 
   async function handleSignUp(e: React.FormEvent) {
@@ -76,16 +78,16 @@ export function LoginForm() {
       email,
       password,
     });
-    setLoading(false);
     if (error) {
+      setLoading(false);
       setError(error.message);
       return;
     }
     // If email confirmation is disabled, a session is returned immediately.
     if (data.session) {
-      router.push(next);
-      router.refresh();
+      window.location.href = next;
     } else {
+      setLoading(false);
       setNotice(
         "Account created. If email confirmation is enabled, check your inbox to verify before signing in."
       );
@@ -215,7 +217,7 @@ export function LoginForm() {
             <button
               type="submit"
               disabled={loading || googleLoading}
-              className="accent-btn mt-2 py-2.5 w-full text-sm font-bold disabled:opacity-60"
+              className="accent-btn mt-2 py-2.5 w-full text-sm font-bold disabled:opacity-60 cursor-pointer"
             >
               {submitLabel}
             </button>
