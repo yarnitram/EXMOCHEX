@@ -15,6 +15,8 @@ services:
         required: false
     environment:
       - POLL_INTERVAL=2
+      - NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL:-https://sup.ymatt.online}
+      - NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzkyMzk5Njk1LCJleHAiOjE5NTAwNzk2OTV9.wSXO5wzneeuWZyWFR09HVgF2ZwTmVNslHp1sZNYh18Y}
     logging:
       driver: "json-file"
       options:
@@ -30,7 +32,7 @@ services:
       dockerfile: Dockerfile.web
       args:
         NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL:-https://sup.ymatt.online}
-        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY:-}
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzkyMzk5Njk1LCJleHAiOjE5NTAwNzk2OTV9.wSXO5wzneeuWZyWFR09HVgF2ZwTmVNslHp1sZNYh18Y}
     container_name: exmochex-web
     restart: unless-stopped
     ports:
@@ -39,7 +41,7 @@ services:
       - PORT=3015
       - HOSTNAME=0.0.0.0
       - NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL:-https://sup.ymatt.online}
-      - NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY:-}
+      - NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzkyMzk5Njk1LCJleHAiOjE5NTAwNzk2OTV9.wSXO5wzneeuWZyWFR09HVgF2ZwTmVNslHp1sZNYh18Y}
       - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY:-}
     env_file:
       - path: .env
