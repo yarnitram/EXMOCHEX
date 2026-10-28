@@ -7,6 +7,7 @@ import {
   cleanSymbol,
   fmtPx,
   formatDaysActive,
+  fmtFundingRate,
 } from "@/lib/format";
 
 describe("format - Display Formatters & Symbol Cleaners", () => {
@@ -101,6 +102,19 @@ describe("format - Display Formatters & Symbol Cleaners", () => {
       expect(formatDaysActive(null, fixedNow)).toEqual({ text: "—", fullDate: "", days: -1 });
       expect(formatDaysActive(undefined, fixedNow)).toEqual({ text: "—", fullDate: "", days: -1 });
       expect(formatDaysActive("invalid-date", fixedNow)).toEqual({ text: "—", fullDate: "", days: -1 });
+    });
+  });
+  describe("fmtFundingRate", () => {
+    it("formats 8h perpetual funding rate with signed percentage and 4 decimal places", () => {
+      expect(fmtFundingRate(0.0001)).toBe("+0.0100%");
+      expect(fmtFundingRate(0.00025)).toBe("+0.0250%");
+      expect(fmtFundingRate(-0.00015)).toBe("-0.0150%");
+      expect(fmtFundingRate(0)).toBe("+0.0000%");
+    });
+
+    it("handles null and undefined gracefully", () => {
+      expect(fmtFundingRate(null)).toBe("0.0000%");
+      expect(fmtFundingRate(undefined)).toBe("0.0000%");
     });
   });
 });

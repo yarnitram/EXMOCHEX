@@ -124,3 +124,12 @@ export function formatDaysActive(
   }
   return { text: `${days}d`, fullDate, days };
 }
+
+/**
+ * Format a perpetual funding rate as signed percentage (e.g. 0.0001 -> "+0.0100%").
+ */
+export function fmtFundingRate(rate: number | null | undefined): string {
+  if (rate == null || !Number.isFinite(rate)) return "0.0000%";
+  const pct = rate * 100;
+  return `${pct >= 0 ? "+" : ""}${pct.toFixed(4)}%`;
+}

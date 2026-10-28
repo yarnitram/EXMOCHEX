@@ -10,6 +10,7 @@ import { TipModal } from "@/components/ui/tip-modal";
 
 const LINKS = [
   { href: "/watchlist", label: "Watchlist", icon: "🪙" },
+  { href: "/screener", label: "Screener", icon: "📡" },
   { href: "/trades", label: "Trades", icon: "⚡" },
   { href: "/chart", label: "Chart", icon: "📈" },
   { href: "/journal", label: "Journal", icon: "📖" },

@@ -39,6 +39,7 @@ export interface AddTokenModalProps {
   existingSymbols: Set<string>;
   icons?: Record<string, string>;
   onConfigurePlan?: (item: WatchlistItem) => void;
+  initialSymbol?: string;
 }
 
 const POPULAR_TOKENS = [
@@ -68,6 +69,7 @@ export function AddTokenModal({
   existingSymbols,
   icons = {},
   onConfigurePlan,
+  initialSymbol,
 }: AddTokenModalProps) {
   // Token search & selection
   const [query, setQuery] = useState("");
@@ -115,7 +117,11 @@ export function AddTokenModal({
       setFormError(null);
       setSuccessBanner(null);
       setLastAddedItem(null);
-      setTimeout(() => searchInputRef.current?.focus(), 50);
+      if (initialSymbol) {
+        handleSelectChip(initialSymbol);
+      } else {
+        setTimeout(() => searchInputRef.current?.focus(), 50);
+      }
     }
   }, [open]);
 
