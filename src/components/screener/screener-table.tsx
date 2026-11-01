@@ -193,7 +193,7 @@ export function ScreenerTable({
 
                   {/* Coin info */}
                   <td className="py-3 px-3.5">
-                    <div className="flex items-center gap-2.5">
+                    <Link href={`/token/${coin.baseCoin}`} className="flex items-center gap-2.5 hover:opacity-85 transition-opacity" title={`View ${coin.baseCoin} Market Cap, Supplies & Usecase`}>
                       {coin.baseCoinIconUrl && !hasBrokenIcon ? (
                         /* eslint-disable-next-line @next/next/no-img-element */
                         <img
@@ -230,7 +230,7 @@ export function ScreenerTable({
                           {coin.displayNameEn}
                         </div>
                       </div>
-                    </div>
+                    </Link>
                   </td>
 
                   {/* Last Price */}
@@ -316,6 +316,15 @@ export function ScreenerTable({
                       >
                         + Setup
                       </button>
+
+                      {/* Token Fundamentals */}
+                      <Link
+                        href={`/token/${coin.baseCoin}`}
+                        title={`View ${coin.baseCoin} Fundamentals & Market Cap`}
+                        className="p-1 rounded bg-paper-2 text-muted hover:text-accent hover:bg-paper-3 border border-line transition-colors"
+                      >
+                        ℹ️
+                      </Link>
 
                       {/* Chart */}
                       <Link

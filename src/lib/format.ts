@@ -133,3 +133,20 @@ export function fmtFundingRate(rate: number | null | undefined): string {
   const pct = rate * 100;
   return `${pct >= 0 ? "+" : ""}${pct.toFixed(4)}%`;
 }
+
+/**
+ * Format token supply numbers with compact suffixes (K, M, B, T).
+ * e.g. 19_750_000 -> "19.75M", 420_690_000_000_000 -> "420.69T"
+ */
+export function compactSupply(v: number | null | undefined, symbol = ""): string {
+  if (v == null || !Number.isFinite(v) || v <= 0) return "—";
+  const abs = Math.abs(v);
+  let str = "";
+  if (abs >= 1e12) str = `${(v / 1e12).toFixed(2)}T`;
+  else if (abs >= 1e9) str = `${(v / 1e9).toFixed(2)}B`;
+  else if (abs >= 1e6) str = `${(v / 1e6).toFixed(2)}M`;
+  else if (abs >= 1e3) str = `${(v / 1e3).toFixed(2)}K`;
+  else str = v.toLocaleString("en-US", { maximumFractionDigits: 2 });
+
+  return symbol ? `${str} ${symbol}` : str;
+}

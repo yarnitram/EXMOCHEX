@@ -16,6 +16,7 @@ export async function proxy(request: NextRequest) {
     pathname.startsWith("/risk") ||
     pathname.startsWith("/watchlist") ||
     pathname.startsWith("/screener") ||
+    pathname.startsWith("/token") ||
     pathname.startsWith("/chart") ||
     pathname.startsWith("/trades") ||
     pathname.startsWith("/admin") ||
@@ -55,6 +56,7 @@ export const config = {
     "/risk/:path*",
     "/watchlist/:path*",
     "/screener/:path*",
+    "/token/:path*",
     "/chart/:path*",
     "/trades/:path*",
     "/admin/:path*",
