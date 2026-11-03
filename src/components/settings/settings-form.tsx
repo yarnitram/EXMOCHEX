@@ -13,6 +13,7 @@ import {
 } from "@/lib/audio";
 import { playAlarmSound, AlarmSoundPreset } from "@/lib/audio-alarm-engine";
 import { TipModal } from "@/components/ui/tip-modal";
+import { BotApiDocsPanel } from "@/components/trades/bot-api-docs-panel";
 
 interface Props {
   userEmail: string;
@@ -60,7 +61,7 @@ const TABS: TabConfig[] = [
   { id: "profile",       label: "Profile",       icon: "👤", desc: "Public handle & showcase" },
   { id: "notifications", label: "Alerts",        icon: "🔔", desc: "Discord, Telegram & Desktop" },
   { id: "audio",         label: "Audio & Radar", icon: "🔊", desc: "SFX volume & proximity radar" },
-  { id: "integrations",  label: "Integrations",  icon: "📡", desc: "TradingView webhooks" },
+  { id: "integrations",  label: "API & Webhooks", icon: "🤖", desc: "Mochbot API & TradingView" },
   { id: "risk",          label: "Risk Limits",   icon: "⚖️", desc: "Drawdown & position sizing" },
   { id: "storage",       label: "Cloud Storage", icon: "💾", desc: "Google Drive screenshot bucket", adminOnly: true },
   { id: "support",       label: "Support",       icon: "💖", desc: "Server hosting & tip jar" },
@@ -259,6 +260,13 @@ export function SettingsForm({ userEmail, isAdmin = false, account, riskSettings
 
     if (typeof window !== "undefined") {
       const params = new URLSearchParams(window.location.search);
+      const tabParam = params.get("tab");
+      if (
+        tabParam &&
+        ["profile", "notifications", "audio", "integrations", "risk", "storage", "support"].includes(tabParam)
+      ) {
+        setActiveTab(tabParam as TabId);
+      }
       if (params.get("gdrive")?.startsWith("connected")) {
         setStatus("Site-wide Google Drive connected successfully! ✓");
         setGdriveConnected(true);
@@ -899,100 +907,13 @@ export function SettingsForm({ userEmail, isAdmin = false, account, riskSettings
         {/* ════ INTEGRATIONS TAB ════ */}
         {activeTab === "integrations" && (
           <div className="flex flex-col gap-5">
-            <SectionCard>
-              <div className="flex items-start justify-between flex-wrap gap-3">
-                <SectionTitle icon="📡" title="TradingView Webhook Automation"
-                  subtitle="Pipe TradingView alerts directly into your MOCHEX Watchlist or Trades table." />
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-accent/15 text-accent border border-accent/25 font-mono uppercase tracking-wider">
-                  Automation
-                </span>
-              </div>
-
-              {/* Webhook URL */}
-              <div className="flex flex-col gap-2 p-4 rounded-xl bg-canvas/60 border border-line">
-                <div className="flex items-center justify-between flex-wrap gap-2">
-                  <span className="text-xs font-semibold text-text">🔗 Your Personal Webhook URL</span>
-                  <button type="button" onClick={copyWebhookUrl}
-                    className="px-3 py-1 rounded-lg text-xs font-semibold bg-accent text-white hover:opacity-90 transition-all cursor-pointer shadow-sm">
-                    {copiedWebhook ? "✓ Copied!" : "📋 Copy URL"}
-                  </button>
-                </div>
-                <input type="text" readOnly value={webhookUrl} onClick={(e) => (e.target as HTMLInputElement).select()}
-                  className="w-full px-3 py-2 text-xs font-mono rounded bg-panel border border-line text-accent select-all outline-none" />
-                <span className="text-[11px] text-muted">Paste this into the Webhook URL field in your TradingView Alert dialog.</span>
-              </div>
-
-              {/* Secret Key */}
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-xl bg-canvas/40 border border-line">
-                <div className="flex flex-col gap-1">
-                  <span className="text-xs font-semibold text-text">Webhook Secret Key</span>
-                  <div className="flex items-center gap-2">
-                    <input type={showSecret ? "text" : "password"} readOnly value={webhookSecret}
-                      className="font-mono text-xs px-2.5 py-1.5 rounded bg-panel border border-line text-muted w-48 sm:w-64 outline-none" />
-                    <button type="button" onClick={() => setShowSecret((p) => !p)}
-                      className="text-xs text-muted hover:text-text px-2 py-1 rounded border border-line cursor-pointer">
-                      {showSecret ? "Hide" : "Show"}
-                    </button>
-                  </div>
-                </div>
-                <button type="button" onClick={handleRegenerateSecret} disabled={regeneratingSecret}
-                  className="text-xs text-muted hover:text-loss border border-line hover:border-loss/40 px-3 py-1.5 rounded-lg transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap">
-                  {regeneratingSecret ? "Regenerating…" : "🔄 Roll Secret"}
-                </button>
-              </div>
-            </SectionCard>
-
-            {/* JSON Generator */}
-            <SectionCard>
-              <SectionTitle icon="🛠️" title="Alert Message Generator" subtitle="Build and copy a ready-to-paste JSON payload for TradingView alerts." />
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
-                {[
-                  { label: "Destination", node: <select value={genType} onChange={(e) => setGenType(e.target.value as "watchlist" | "trade")} className="hairline bg-panel px-2.5 py-1.5 rounded text-xs outline-none focus:border-accent cursor-pointer"><option value="watchlist">Watchlist Setup</option><option value="trade">Direct Trade</option></select> },
-                  { label: "Symbol", node: <input type="text" value={genSymbol} onChange={(e) => setGenSymbol(e.target.value)} placeholder="{{ticker}}" className="hairline bg-panel px-2.5 py-1.5 rounded text-xs font-mono outline-none focus:border-accent" /> },
-                  { label: "Side", node: <select value={genSide} onChange={(e) => setGenSide(e.target.value as "long" | "short")} className="hairline bg-panel px-2.5 py-1.5 rounded text-xs outline-none focus:border-accent cursor-pointer"><option value="long">↗ LONG</option><option value="short">↘ SHORT</option></select> },
-                  { label: "Order Type", node: <select value={genOrderType} onChange={(e) => setGenOrderType(e.target.value as "limit" | "market")} className="hairline bg-panel px-2.5 py-1.5 rounded text-xs outline-none focus:border-accent cursor-pointer"><option value="limit">Limit</option><option value="market">Market</option></select> },
-                  ...(genType === "watchlist" ? [{ label: "Trigger Price", node: <input type="text" value={genTrigger} onChange={(e) => setGenTrigger(e.target.value)} placeholder="{{close}}" className="hairline bg-panel px-2.5 py-1.5 rounded text-xs font-mono outline-none focus:border-accent" /> }] : []),
-                  { label: "Entry Price", node: <input type="text" value={genEntry} onChange={(e) => setGenEntry(e.target.value)} placeholder="{{close}}" className="hairline bg-panel px-2.5 py-1.5 rounded text-xs font-mono outline-none focus:border-accent" /> },
-                  { label: "Stop Loss", node: <input type="text" value={genStopLoss} onChange={(e) => setGenStopLoss(e.target.value)} placeholder="62500" className="hairline bg-panel px-2.5 py-1.5 rounded text-xs font-mono outline-none focus:border-accent" /> },
-                  { label: "Take Profit", node: <input type="text" value={genTakeProfit} onChange={(e) => setGenTakeProfit(e.target.value)} placeholder="68000" className="hairline bg-panel px-2.5 py-1.5 rounded text-xs font-mono outline-none focus:border-accent" /> },
-                ].map(({ label, node }) => (
-                  <label key={label} className="flex flex-col gap-1">
-                    <span className="text-[11px] text-muted">{label}</span>
-                    {node}
-                  </label>
-                ))}
-                <label className="flex flex-col gap-1 sm:col-span-3">
-                  <span className="text-[11px] text-muted">Notes / Thesis</span>
-                  <input type="text" value={genNotes} onChange={(e) => setGenNotes(e.target.value)}
-                    className="hairline bg-panel px-2.5 py-1.5 rounded text-xs font-mono outline-none focus:border-accent" />
-                </label>
-              </div>
-
-              <div className="relative">
-                <pre className="p-3 rounded-lg bg-canvas border border-line text-accent font-mono text-[11px] overflow-x-auto select-all leading-relaxed">
-                  {generatedJsonString}
-                </pre>
-              </div>
-
-              <div className="flex items-center justify-between flex-wrap gap-2">
-                <div className="flex items-center gap-2">
-                  <button type="button" onClick={copyGeneratedPayload}
-                    className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-panel hover:bg-panel-soft border border-line text-text hover:text-accent transition-colors cursor-pointer">
-                    {copiedPayload ? "✓ Copied JSON!" : "📋 Copy Alert JSON"}
-                  </button>
-                  <button type="button" onClick={handleSendTestWebhook} disabled={testingWebhook}
-                    className="px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-panel hover:bg-panel-soft border border-accent/40 text-accent transition-colors cursor-pointer disabled:opacity-50 flex items-center gap-1.5">
-                    ⚡ {testingWebhook ? "Sending…" : "Send Test Alert"}
-                  </button>
-                </div>
-                {testWebhookStatus && (
-                  <span className={`text-xs font-mono ${testWebhookStatus.startsWith("✓") ? "text-gain" : "text-loss"}`}>
-                    {testWebhookStatus}
-                  </span>
-                )}
-              </div>
-            </SectionCard>
+            <BotApiDocsPanel
+              initialSecret={webhookSecret}
+              onSecretChange={(nextKey) => {
+                setWebhookSecret(nextKey);
+                setStatus("API Key / Webhook secret regenerated ✓");
+              }}
+            />
           </div>
         )}
 

@@ -7,6 +7,7 @@ import { ModalShell } from "@/components/ui/modal-shell";
 import { TradeEditModal } from "./trade-edit-modal";
 import { ManualTradeModal } from "./manual-trade-modal";
 import { CloseTradeModal } from "./close-trade-modal";
+import { BotApiDocsPanel } from "./bot-api-docs-panel";
 import { ClosedTradesTab } from "./closed-trades-tab";
 import { ArchivedTradesTab } from "./archived-trades-tab";
 import { useLivePrices, formatLastRefreshed } from "./use-live-prices";
@@ -37,6 +38,7 @@ function CameraIcon({ className = "w-3 h-3" }: { className?: string }) {
 interface Props {
   initialAlerts: TradeAlert[];
   refreshIntervalSec?: number;
+  webhookSecret?: string;
 }
 
 const SORT_KEY = "mochex:trades-sort";
@@ -264,7 +266,7 @@ function saveCols(cols: Record<ColKey, boolean>) {
   }
 }
 
-export function TradesClient({ initialAlerts, refreshIntervalSec = 10 }: Props) {
+export function TradesClient({ initialAlerts, refreshIntervalSec = 10, webhookSecret = "" }: Props) {
   const { onAlertChange } = useRealtimeAlerts();
   const [alerts, setAlerts] = useState<TradeAlert[]>(initialAlerts);
   const [archivedAlerts, setArchivedAlerts] = useState<ArchivedTradeAlert[]>([]);
@@ -323,6 +325,7 @@ export function TradesClient({ initialAlerts, refreshIntervalSec = 10 }: Props) 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [manualModalOpen, setManualModalOpen] = useState(false);
   const [calcModalOpen, setCalcModalOpen] = useState(false);
+  const [botApiModalOpen, setBotApiModalOpen] = useState(false);
   const [closingAlert, setClosingAlert] = useState<TradeAlert | null>(null);
   const [chartAlert, setChartAlert] = useState<TradeRow | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -880,7 +883,14 @@ export function TradesClient({ initialAlerts, refreshIntervalSec = 10 }: Props) 
             Manage active position alerts, view closed trade history, or archive trades.
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            type="button"
+            onClick={() => setBotApiModalOpen(true)}
+            className="px-3.5 py-2 rounded-lg bg-accent/10 hover:bg-accent/20 text-accent text-xs font-semibold flex items-center gap-1.5 border border-accent/30 transition-colors cursor-pointer"
+          >
+            <span>🤖</span> Bot API / Webhook
+          </button>
           <button
             type="button"
             onClick={() => setCalcModalOpen(true)}
@@ -1677,6 +1687,23 @@ export function TradesClient({ initialAlerts, refreshIntervalSec = 10 }: Props) 
         isOpen={lightboxOpen}
         onClose={() => setLightboxOpen(false)}
       />
+
+      {botApiModalOpen && (
+        <ModalShell
+          title="🤖 Mochbot & Trade Webhook API Reference"
+          onClose={() => setBotApiModalOpen(false)}
+          maxWidth="max-w-5xl"
+          disableClickOutside={false}
+        >
+          <BotApiDocsPanel
+            initialSecret={webhookSecret}
+            compact
+            onTradeExecuted={() => {
+              refreshAllAlerts();
+            }}
+          />
+        </ModalShell>
+      )}
     </div>
   );
 }
