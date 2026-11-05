@@ -29,9 +29,15 @@ export function TokenProfileView({ symbol, initialProfile }: TokenProfileViewPro
       setLoading(true);
       setError(null);
       const res = await fetch(`/api/token/${encodeURIComponent(symbol)}`);
-      const data = await res.json();
+      const rawText = await res.text();
+      let data: any = null;
+      try {
+        data = JSON.parse(rawText);
+      } catch {
+        throw new Error(`Upstream service error (HTTP ${res.status})`);
+      }
       if (!res.ok) {
-        throw new Error(data.error || "Failed to load token fundamentals");
+        throw new Error(data?.error || "Failed to load token fundamentals");
       }
       setProfile(data.data);
     } catch (err) {

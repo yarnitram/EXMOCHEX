@@ -96,4 +96,17 @@ describe("Token Profile Fundamentals & Dilution Logic", () => {
       expect(compactSupply(NaN)).toBe("—");
     });
   });
+
+  describe("GET /api/token/[symbol] route handler", () => {
+    it("resolves BTC token profile without double-consuming fetch Response stream", async () => {
+      const { GET } = await import("@/app/api/token/[symbol]/route");
+      const req = new Request("http://localhost:3000/api/token/BTC");
+      const res = await GET(req, { params: Promise.resolve({ symbol: "BTC" }) });
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.success).toBe(true);
+      expect(json.data.symbol).toBe("BTC");
+      expect(json.data.contractSymbol).toBe("BTC_USDT");
+    });
+  });
 });

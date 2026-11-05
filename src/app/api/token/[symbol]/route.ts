@@ -14,6 +14,41 @@ const CACHE_TTL_MS = 60_000; // 60-second in-memory cache
 
 const MEXC_FUTURES_BASE = "https://contract.mexc.com/api/v1/contract";
 
+const KNOWN_PAPRIKA_IDS: Record<string, string> = {
+  BTC: "btc-bitcoin",
+  ETH: "eth-ethereum",
+  SOL: "sol-solana",
+  BNB: "bnb-binance-coin",
+  XRP: "xrp-xrp",
+  DOGE: "doge-dogecoin",
+  ADA: "ada-cardano",
+  AVAX: "avax-avalanche",
+  LINK: "link-chainlink",
+  DOT: "dot-polkadot",
+  TRX: "trx-tron",
+  LTC: "ltc-litecoin",
+  BCH: "bch-bitcoin-cash",
+  UNI: "uni-uniswap",
+  NEAR: "near-near-protocol",
+  APT: "apt-aptos",
+  SUI: "sui-sui",
+  ARB: "arb-arbitrum",
+  OP: "op-optimism",
+  PEPE: "pepe-pepe",
+  SHIB: "shib-shiba-inu",
+  WIF: "wif-dogwifhat",
+  BONK: "bonk-bonk",
+  FET: "fet-fetch-ai",
+  RENDER: "rndr-render-token",
+  INJ: "inj-injective-protocol",
+  TIA: "tia-celestia",
+  SEI: "sei-sei",
+  TON: "ton-toncoin",
+  HBAR: "hbar-hedera-hashgraph",
+  FIL: "fil-filecoin",
+  ATOM: "atom-cosmos",
+};
+
 export async function GET(
   request: Request,
   context: { params: Promise<{ symbol: string }> }
@@ -33,16 +68,71 @@ export async function GET(
   }
 
   try {
-    // 1. Fetch MEXC Futures Ticker & Detail concurrently
-    const [mexcTickerRes, mexcDetailRes] = await Promise.all([
+    // Run MEXC Futures, CoinPaprika, and DexScreener concurrently to minimize latency
+    const mexcPromise = Promise.all([
       fetch(`${MEXC_FUTURES_BASE}/ticker?symbol=${encodeURIComponent(contractSymbol)}`, {
         cache: "no-store",
-        signal: AbortSignal.timeout(6000),
-      }).catch(() => null),
+        signal: AbortSignal.timeout(5000),
+      })
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null),
       fetch(`${MEXC_FUTURES_BASE}/detail?symbol=${encodeURIComponent(contractSymbol)}`, {
         cache: "no-store",
-        signal: AbortSignal.timeout(6000),
-      }).catch(() => null),
+        signal: AbortSignal.timeout(5000),
+      })
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null),
+    ]);
+
+    const paprikaPromise = (async () => {
+      try {
+        let paprikaId = KNOWN_PAPRIKA_IDS[baseSymbol] || null;
+        if (!paprikaId) {
+          const cpSearchRes = await fetch(
+            `https://api.coinpaprika.com/v1/search?q=${encodeURIComponent(baseSymbol)}&c=currencies&limit=6`,
+            { cache: "no-store", signal: AbortSignal.timeout(4500) }
+          );
+          if (cpSearchRes.ok) {
+            const searchJson = await cpSearchRes.json();
+            const match = searchJson.currencies?.find(
+              (c: any) => c.symbol?.toUpperCase() === baseSymbol
+            );
+            if (match?.id) paprikaId = match.id;
+          }
+        }
+        if (!paprikaId) return { cpTicker: null, cpCoin: null };
+
+        const [cpTicker, cpCoin] = await Promise.all([
+          fetch(`https://api.coinpaprika.com/v1/tickers/${paprikaId}`, {
+            cache: "no-store",
+            signal: AbortSignal.timeout(4500),
+          })
+            .then((r) => (r.ok ? r.json() : null))
+            .catch(() => null),
+          fetch(`https://api.coinpaprika.com/v1/coins/${paprikaId}`, {
+            cache: "no-store",
+            signal: AbortSignal.timeout(4500),
+          })
+            .then((r) => (r.ok ? r.json() : null))
+            .catch(() => null),
+        ]);
+        return { cpTicker, cpCoin };
+      } catch {
+        return { cpTicker: null, cpCoin: null };
+      }
+    })();
+
+    const dexPromise = fetch(
+      `https://api.dexscreener.com/latest/dex/search?q=${encodeURIComponent(baseSymbol)}`,
+      { cache: "no-store", signal: AbortSignal.timeout(4500) }
+    )
+      .then((r) => (r.ok ? r.json() : null))
+      .catch(() => null);
+
+    const [[tickerJson, detailJson], { cpTicker, cpCoin }, dexJson] = await Promise.all([
+      mexcPromise,
+      paprikaPromise,
+      dexPromise,
     ]);
 
     let mexcPrice = 0;
@@ -50,100 +140,57 @@ export async function GET(
     let mexcLow24 = 0;
     let mexcChange24 = 0;
     let mexcVolume24 = 0;
-    let mexcOpenInterest = 0;
+    let mexcHoldVol = 0;
     let mexcFundingRate = 0;
     let mexcMaxLev = 50;
     let mexcIcon = "";
     let mexcContractSize = 1;
 
-    if (mexcTickerRes && mexcTickerRes.ok) {
-      const tickerJson = await mexcTickerRes.json();
-      const t = tickerJson.data;
-      if (t) {
-        mexcPrice = Number(t.lastPrice) || 0;
-        mexcHigh24 = Number(t.high24Price) || 0;
-        mexcLow24 = Number(t.lower24Price) || 0;
-        mexcChange24 = Number(t.riseFallRate) || 0;
-        mexcVolume24 = Number(t.amount24) || 0;
-        mexcFundingRate = Number(t.fundingRate) || 0;
-      }
+    const t = tickerJson?.data;
+    if (t) {
+      mexcPrice = Number(t.lastPrice) || 0;
+      mexcHigh24 = Number(t.high24Price) || 0;
+      mexcLow24 = Number(t.lower24Price) || 0;
+      mexcChange24 = Number(t.riseFallRate) || 0;
+      mexcVolume24 = Number(t.amount24) || 0;
+      mexcHoldVol = Number(t.holdVol) || 0;
+      mexcFundingRate = Number(t.fundingRate) || 0;
     }
 
-    if (mexcDetailRes && mexcDetailRes.ok) {
-      const detailJson = await mexcDetailRes.json();
-      const d = detailJson.data;
-      if (d) {
-        mexcMaxLev = Number(d.maxLeverage) || 50;
-        mexcIcon = d.baseCoinIconUrl || "";
-        mexcContractSize = Number(d.contractSize) || 1;
-      }
+    const d = detailJson?.data;
+    if (d) {
+      mexcMaxLev = Number(d.maxLeverage) || 50;
+      mexcIcon = d.baseCoinIconUrl || "";
+      mexcContractSize = Number(d.contractSize) || 1;
     }
 
-    // 2. Fetch CoinPaprika Token Data
-    let cpTicker: any = null;
-    let cpCoin: any = null;
-
-    try {
-      const cpSearchRes = await fetch(
-        `https://api.coinpaprika.com/v1/search?q=${encodeURIComponent(baseSymbol)}&c=currencies&limit=6`,
-        { cache: "no-store", signal: AbortSignal.timeout(6000) }
-      );
-      if (cpSearchRes.ok) {
-        const searchJson = await cpSearchRes.json();
-        const match = searchJson.currencies?.find(
-          (c: any) => c.symbol.toUpperCase() === baseSymbol
-        );
-        if (match?.id) {
-          const [tRes, cRes] = await Promise.all([
-            fetch(`https://api.coinpaprika.com/v1/tickers/${match.id}`, {
-              cache: "no-store",
-              signal: AbortSignal.timeout(6000),
-            }).catch(() => null),
-            fetch(`https://api.coinpaprika.com/v1/coins/${match.id}`, {
-              cache: "no-store",
-              signal: AbortSignal.timeout(6000),
-            }).catch(() => null),
-          ]);
-          if (tRes && tRes.ok) cpTicker = await tRes.json();
-          if (cRes && cRes.ok) cpCoin = await cRes.json();
-        }
-      }
-    } catch {}
-
-    // 3. Optional DexScreener Fallback for Socials and Web
+    // Extract DexScreener fallback socials and valuation
     let dexWebsites: string[] = [];
     let dexTwitter: string | null = null;
     let dexTelegram: string | null = null;
     let dexMarketCap = 0;
     let dexFdv = 0;
 
-    try {
-      const dexRes = await fetch(
-        `https://api.dexscreener.com/latest/dex/search?q=${encodeURIComponent(baseSymbol)}`,
-        { cache: "no-store", signal: AbortSignal.timeout(5000) }
+    if (dexJson?.pairs) {
+      const matchPair = dexJson.pairs.find(
+        (p: any) =>
+          p.baseToken?.symbol?.toUpperCase() === baseSymbol &&
+          (p.info?.websites || p.info?.socials)
       );
-      if (dexRes.ok) {
-        const dexJson = await dexRes.json();
-        const matchPair = dexJson.pairs?.find(
-          (p: any) =>
-            p.baseToken?.symbol?.toUpperCase() === baseSymbol &&
-            (p.info?.websites || p.info?.socials)
-        );
-        if (matchPair) {
-          dexMarketCap = Number(matchPair.marketCap) || 0;
-          dexFdv = Number(matchPair.fdv) || 0;
-          if (Array.isArray(matchPair.info?.websites)) {
-            dexWebsites = matchPair.info.websites.map((w: any) => w.url).filter(Boolean);
-          }
-          if (Array.isArray(matchPair.info?.socials)) {
-            for (const s of matchPair.info.socials) {
-              if (s.type === "twitter" && !dexTwitter) dexTwitter = s.url;
-              if (s.type === "telegram" && !dexTelegram) dexTelegram = s.url;
-            }
+      if (matchPair) {
+        dexMarketCap = Number(matchPair.marketCap) || 0;
+        dexFdv = Number(matchPair.fdv) || 0;
+        if (Array.isArray(matchPair.info?.websites)) {
+          dexWebsites = matchPair.info.websites.map((w: any) => w.url).filter(Boolean);
+        }
+        if (Array.isArray(matchPair.info?.socials)) {
+          for (const s of matchPair.info.socials) {
+            if (s.type === "twitter" && !dexTwitter) dexTwitter = s.url;
+            if (s.type === "telegram" && !dexTelegram) dexTelegram = s.url;
           }
         }
       }
-    } catch {}
+    }
 
     // 4. Resolve Metrics & Synthesize Fundamentals
     const finalPrice = mexcPrice > 0 ? mexcPrice : Number(cpTicker?.quotes?.USD?.price) || 0;
@@ -177,7 +224,7 @@ export async function GET(
       marketCap = circulatingSupply * finalPrice;
     }
 
-    let fdv: number | null =
+    const fdv: number | null =
       dexFdv ||
       (maxSupply && finalPrice > 0
         ? maxSupply * finalPrice
@@ -211,10 +258,9 @@ export async function GET(
     const spotVolume = Number(cpTicker?.quotes?.USD?.volume_24h) || 0;
     const volume24h = Math.max(spotVolume, mexcVolume24) || (spotVolume + mexcVolume24) || null;
 
-    // Perps Open Interest
-    const holdVolContracts = Number(mexcTickerRes ? (await mexcTickerRes.clone().json().catch(() => ({})))?.data?.holdVol : 0) || 0;
-    const openInterest = holdVolContracts > 0
-      ? holdVolContracts * mexcContractSize * (finalPrice || 1)
+    // Perps Open Interest (computed directly from parsed mexcHoldVol without double-consuming stream)
+    const openInterest = mexcHoldVol > 0
+      ? mexcHoldVol * mexcContractSize * (finalPrice || 1)
       : null;
 
     const volumeMcRatio = marketCap && volume24h ? volume24h / marketCap : null;
@@ -237,8 +283,8 @@ export async function GET(
     // Categories / Tags
     const categories: string[] = [];
     if (Array.isArray(cpCoin?.tags)) {
-      for (const t of cpCoin.tags) {
-        if (t.name && categories.length < 6) categories.push(t.name);
+      for (const tag of cpCoin.tags) {
+        if (tag.name && categories.length < 6) categories.push(tag.name);
       }
     }
     if (categories.length === 0) {
@@ -320,7 +366,7 @@ export async function GET(
   } catch (err) {
     return NextResponse.json(
       { error: (err as Error).message || "Failed to fetch token profile" },
-      { status: 502 }
+      { status: 500 }
     );
   }
 }
