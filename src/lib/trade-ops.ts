@@ -83,12 +83,17 @@ export const MISSING_LEVERAGE_COLUMN =
  */
 export async function createTrade(
   supabase: ServerSupabase,
-  input: TradeInput
+  input: TradeInput,
+  explicitUserId?: string
 ): Promise<{ id: string; leveragePersisted: boolean }> {
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) throw new Error("Not authenticated");
+  let userId = explicitUserId;
+  if (!userId) {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) throw new Error("Not authenticated");
+    userId = user.id;
+  }
 
   const hasExit = input.exit_price != null && !Number.isNaN(input.exit_price);
   const status = hasExit ? "closed" : "open";
@@ -148,7 +153,7 @@ export async function createTrade(
     .map((t) => t.trim())
     .filter(Boolean);
   if (tagNames.length) {
-    const ids = await ensureTagIds(supabase, user.id, tagNames);
+    const ids = await ensureTagIds(supabase, userId, tagNames);
     if (ids.length) {
       await supabase
         .from("trade_tags")
@@ -199,12 +204,17 @@ export async function createTrade(
 export async function updateTrade(
   supabase: ServerSupabase,
   tradeId: string,
-  input: TradeInput
+  input: TradeInput,
+  explicitUserId?: string
 ): Promise<{ leveragePersisted: boolean }> {
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) throw new Error("Not authenticated");
+  let userId = explicitUserId;
+  if (!userId) {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) throw new Error("Not authenticated");
+    userId = user.id;
+  }
 
   const hasExit = input.exit_price != null && !Number.isNaN(input.exit_price);
   const status = hasExit ? "closed" : "open";
@@ -258,7 +268,7 @@ export async function updateTrade(
 
   const tagNames = (input.tags ?? []).map((t) => t.trim()).filter(Boolean);
   if (tagNames.length) {
-    const ids = await ensureTagIds(supabase, user.id, tagNames);
+    const ids = await ensureTagIds(supabase, userId, tagNames);
     if (ids.length) {
       await supabase
         .from("trade_tags")

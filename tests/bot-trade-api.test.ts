@@ -59,7 +59,7 @@ describe("Bot & Trade Webhook API Helpers", () => {
   });
 
   describe("normalizeBotAction", () => {
-    it("maps open, update, close, and watchlist actions accurately", () => {
+    it("maps open, update, close, watchlist, and journal actions accurately", () => {
       expect(normalizeBotAction({})).toBe("open");
       expect(normalizeBotAction({ action: "trade" })).toBe("open");
       expect(normalizeBotAction({ action: "execute" })).toBe("open");
@@ -68,6 +68,9 @@ describe("Bot & Trade Webhook API Helpers", () => {
       expect(normalizeBotAction({ action: "close" })).toBe("close");
       expect(normalizeBotAction({ action: "tp_hit" })).toBe("close");
       expect(normalizeBotAction({ action: "watchlist" })).toBe("watchlist");
+      expect(normalizeBotAction({ action: "setup" })).toBe("watchlist");
+      expect(normalizeBotAction({ action: "journal" })).toBe("journal");
+      expect(normalizeBotAction({ action: "log_trade" })).toBe("journal");
       expect(
         normalizeBotAction({ status: "closed", trade_id: "uuid-123" })
       ).toBe("close");
@@ -96,7 +99,7 @@ describe("Bot & Trade Webhook API Helpers", () => {
   });
 
   describe("formatBotNotificationSummary & BOT_API_FIELDS_SPEC", () => {
-    it("formats open, update, and close notifications cleanly", () => {
+    it("formats open, update, close, watchlist, and journal notifications cleanly", () => {
       const openSummary = formatBotNotificationSummary({
         action: "open",
         symbol: "SOL_USDT",
@@ -120,20 +123,47 @@ describe("Bot & Trade Webhook API Helpers", () => {
         pnlPct: 1.779,
       });
       expect(closeSummary.title).toContain("+$177.90");
+
+      const watchSummary = formatBotNotificationSummary({
+        action: "watchlist",
+        symbol: "BTC_USDT",
+        side: "long",
+        triggerPrice: 64200,
+        entryPrice: 64000,
+      });
+      expect(watchSummary.title).toContain("Watchlist Setup");
+      expect(watchSummary.message).toContain("64200");
+
+      const journalSummary = formatBotNotificationSummary({
+        action: "journal",
+        symbol: "ETH_USDT",
+        side: "short",
+        entryPrice: 2600,
+        exitPrice: 2450,
+        pnlUsd: 115.38,
+        leverage: 20,
+      });
+      expect(journalSummary.title).toContain("Logged to Journal");
+      expect(journalSummary.title).toContain("+$115.38");
     });
 
-    it("documents all core trade lifecycle fields in BOT_API_FIELDS_SPEC", () => {
+    it("documents all core trade, watchlist, and journal fields in BOT_API_FIELDS_SPEC", () => {
       const fieldNames = BOT_API_FIELDS_SPEC.map((f) => f.field);
       expect(fieldNames).toContain("action");
       expect(fieldNames).toContain("symbol");
       expect(fieldNames).toContain("side");
+      expect(fieldNames).toContain("trigger_price");
       expect(fieldNames).toContain("entry_price");
       expect(fieldNames).toContain("stop_loss");
       expect(fieldNames).toContain("take_profit");
       expect(fieldNames).toContain("margin_usd");
       expect(fieldNames).toContain("leverage");
+      expect(fieldNames).toContain("size");
       expect(fieldNames).toContain("trade_id");
       expect(fieldNames).toContain("exit_price");
+      expect(fieldNames).toContain("tags");
+      expect(fieldNames).toContain("fees");
+      expect(fieldNames).toContain("discipline_score");
       expect(fieldNames).toContain("api_key");
     });
   });

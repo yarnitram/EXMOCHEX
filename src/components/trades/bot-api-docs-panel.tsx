@@ -28,6 +28,7 @@ export function BotApiDocsPanel({
   const [symbol, setSymbol] = useState("SOL_USDT");
   const [side, setSide] = useState<BotSide>("long");
   const [orderType, setOrderType] = useState<"market" | "limit">("market");
+  const [triggerPrice, setTriggerPrice] = useState("184.00");
   const [entryPrice, setEntryPrice] = useState("185.50");
   const [stopLoss, setStopLoss] = useState("178.00");
   const [takeProfit, setTakeProfit] = useState("202.00");
@@ -38,6 +39,9 @@ export function BotApiDocsPanel({
   const [tradeId, setTradeId] = useState("");
   const [moveToBe, setMoveToBe] = useState(false);
   const [notes, setNotes] = useState("Mochbot Momentum Signal");
+  const [tagsInput, setTagsInput] = useState("Mochbot, Momentum");
+  const [feesInput, setFeesInput] = useState("0.80");
+  const [disciplineScore, setDisciplineScore] = useState("5");
   const [notify, setNotify] = useState(true);
 
   const [codeTab, setCodeTab] = useState<CodeTab>("json");
@@ -150,23 +154,61 @@ export function BotApiDocsPanel({
       return obj;
     }
 
+    if (action === "journal") {
+      const parsedTags = tagsInput
+        .split(",")
+        .map((t) => t.trim())
+        .filter(Boolean);
+      const obj: Record<string, unknown> = {
+        action: "journal",
+        symbol: symbol.trim() || "SOL_USDT",
+        side,
+        entry_price: Number(entryPrice) || 185.5,
+      };
+      if (exitPrice.trim() !== "") {
+        obj.exit_price = Number(exitPrice) || exitPrice;
+      }
+      if (stopLoss.trim() !== "") {
+        obj.stop_loss = Number(stopLoss) || stopLoss;
+      }
+      obj.margin_usd = Number(marginUsd) || 100;
+      obj.leverage = Number(leverage) || 20;
+      if (feesInput.trim() !== "") {
+        obj.fees = Number(feesInput) || 0;
+      }
+      if (parsedTags.length > 0) {
+        obj.tags = parsedTags;
+      }
+      if (disciplineScore.trim() !== "") {
+        obj.discipline_score = Number(disciplineScore) || 5;
+      }
+      if (notes.trim()) {
+        obj.post_trade_review = notes.trim();
+      }
+      if (!notify) obj.notify = false;
+      return obj;
+    }
+
     // watchlist
-    return {
+    const obj: Record<string, unknown> = {
       action: "watchlist",
       symbol: symbol.trim() || "SOL_USDT",
       side,
-      order_type: orderType,
-      trigger_price: Number(entryPrice) || 185.5,
+      order_type: orderType === "market" ? "limit" : orderType,
+      trigger_price: Number(triggerPrice) || Number(entryPrice) || 184.0,
       entry_price: Number(entryPrice) || 185.5,
       stop_loss: Number(stopLoss) || 178.0,
       take_profit: Number(takeProfit) || 202.0,
       notes: notes.trim() || "Watchlist Setup",
     };
+    if (!notify) obj.notify = false;
+    return obj;
   }, [
     action,
     symbol,
     side,
     orderType,
+    triggerPrice,
     entryPrice,
     stopLoss,
     takeProfit,
@@ -177,6 +219,9 @@ export function BotApiDocsPanel({
     tradeId,
     moveToBe,
     notes,
+    tagsInput,
+    feesInput,
+    disciplineScore,
     notify,
   ]);
 
@@ -206,8 +251,7 @@ res = requests.post(
     timeout=10,
 )
 data = res.json()
-print("MOCHEX Response:", data)
-# Save data.get("trade_id") to update SL/TP or close this exact trade later!`;
+print("MOCHEX Response:", data)`;
   }, [endpointUrl, apiKey, payloadObject]);
 
   const nodeSnippet = useMemo(() => {
@@ -221,7 +265,7 @@ print("MOCHEX Response:", data)
 });
 
 const result = await response.json();
-console.log("MOCHEX Trade ID:", result.trade_id, result);`;
+console.log("MOCHEX Result:", result);`;
   }, [endpointUrl, apiKey, payloadObject]);
 
   const curlSnippet = useMemo(() => {
@@ -263,7 +307,9 @@ console.log("MOCHEX Trade ID:", result.trade_id, result);`;
         ok: true,
         message:
           data.message ||
-          `✓ Action '${data.action}' succeeded for ${data.symbol || "trade"} (ID: ${data.trade_id || data.watchlist_id || "ok"})`,
+          `✓ Action '${data.action}' succeeded for ${data.symbol || "item"} (ID: ${
+            data.trade_id || data.watchlist_id || data.journal_trade_id || "ok"
+          })`,
         raw: data,
       });
       onTradeExecuted?.();
@@ -285,15 +331,16 @@ console.log("MOCHEX Trade ID:", result.trade_id, result);`;
           <div className="flex flex-col gap-0.5">
             <h3 className="text-sm font-semibold text-text flex items-center gap-2">
               <span>🔑</span>
-              <span>Mochbot &amp; Trade Webhook API Credentials</span>
+              <span>Mochbot &amp; Unified Webhook API Credentials</span>
             </h3>
             <p className="text-xs text-muted">
-              Send live trades from <strong>Mochbot</strong>, Python scripts, or TradingView directly to your{" "}
-              <code className="text-accent font-mono">/trades</code> page. Once opened, MOCHEX&apos;s 24/7 WebSocket engine automatically monitors SL &amp; TP hits.
+              Push live trades to <code className="text-accent font-mono">/trades</code>, price-trigger setups to{" "}
+              <code className="text-accent font-mono">/watchlist</code>, or completed records directly to{" "}
+              <code className="text-accent font-mono">/journal</code> using a single API Key.
             </p>
           </div>
           <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-mono uppercase tracking-wider font-bold">
-            REST + Webhook Ready
+            Trades · Watchlist · Journal
           </span>
         </div>
 
@@ -330,8 +377,8 @@ console.log("MOCHEX Trade ID:", result.trade_id, result);`;
               className="w-full px-2.5 py-1.5 text-xs font-mono rounded bg-panel border border-line text-accent select-all outline-none"
             />
             <span className="text-[11px] text-muted">
-              Supports <code className="font-mono text-text">POST</code> (open / update / close trade) &amp;{" "}
-              <code className="font-mono text-text">GET</code> (list active open trades).
+              Supports <code className="font-mono text-text">POST</code> (open / update / close / watchlist / journal) &amp;{" "}
+              <code className="font-mono text-text">GET</code> (list active trades &amp; watchlist).
             </span>
           </div>
 
@@ -384,102 +431,109 @@ console.log("MOCHEX Trade ID:", result.trade_id, result);`;
         </div>
       </div>
 
-      {/* ── 2. Quick Guide: What Data Is Needed to Run a Trade on /trades ── */}
+      {/* ── 2. Quick Guide: What Data Is Needed for Trades, Watchlist & Journal ── */}
       <div className="rounded-2xl border border-line bg-panel/40 p-5 sm:p-6 flex flex-col gap-4 shadow-xs">
         <div className="flex flex-col gap-0.5">
           <h3 className="text-sm font-semibold text-text flex items-center gap-2">
             <span>📋</span>
-            <span>What Data Is Needed to Run a Trade on the Trades Page?</span>
+            <span>Supported Actions &amp; Required Data Fields</span>
           </h3>
           <p className="text-xs text-muted">
-            Here is the exact data required for each trade lifecycle stage (<code className="font-mono text-accent">open</code>,{" "}
-            <code className="font-mono text-accent">update</code>, and <code className="font-mono text-accent">close</code>) plus how MOCHEX processes it:
+            Use the <code className="font-mono text-accent">action</code> field in your JSON body to route data to{" "}
+            <code className="font-mono text-text">/trades</code>, <code className="font-mono text-text">/watchlist</code>, or{" "}
+            <code className="font-mono text-text">/journal</code>:
           </p>
         </div>
 
-        {/* 3 Lifecycle Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5 text-xs">
-          <div className="p-3.5 rounded-xl border border-emerald-500/25 bg-emerald-500/5 flex flex-col gap-2">
+        {/* 5 Action Summary Cards */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 text-xs">
+          <div className="p-3 rounded-xl border border-emerald-500/25 bg-emerald-500/5 flex flex-col gap-1.5">
             <div className="flex items-center justify-between">
-              <span className="font-mono font-bold text-emerald-400 uppercase tracking-wider text-[11px]">
-                1. Open Trade (&quot;open&quot;)
+              <span className="font-mono font-bold text-emerald-400 uppercase text-[11px]">
+                1. &quot;open&quot;
               </span>
-              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300">
-                Runs on /trades
+              <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300">
+                /trades
               </span>
             </div>
-            <p className="text-[11px] text-muted leading-relaxed">
-              Creates an active position on <code className="text-text">/trades</code> and subscribes it to live MEXC WebSocket ticks.
+            <p className="text-[11px] text-muted leading-snug">
+              Opens an active trade &amp; monitors SL/TP 24/7.
             </p>
-            <div className="text-[11px] font-mono flex flex-col gap-1 pt-1 border-t border-emerald-500/15">
-              <span>
-                <strong className="text-text">Required:</strong> <code>symbol</code>, <code>side</code> (&quot;long&quot;|&quot;short&quot;)
-              </span>
-              <span>
-                <strong className="text-text">Auto-Filled:</strong> <code>entry_price</code> (uses live MEXC price if omitted)
-              </span>
-              <span>
-                <strong className="text-text">Monitored 24/7:</strong> <code>stop_loss</code>, <code>take_profit</code>
-              </span>
-              <span>
-                <strong className="text-text">Position Sizing:</strong> <code>margin_usd</code> ($100), <code>leverage</code> (20)
-              </span>
+            <div className="text-[10px] font-mono text-muted pt-1 border-t border-emerald-500/15 flex flex-col gap-0.5">
+              <span><b className="text-text">Req:</b> symbol, side</span>
+              <span><b className="text-text">Opt:</b> entry_price, stop_loss, take_profit, margin_usd, leverage</span>
             </div>
           </div>
 
-          <div className="p-3.5 rounded-xl border border-amber-500/25 bg-amber-500/5 flex flex-col gap-2">
+          <div className="p-3 rounded-xl border border-amber-500/25 bg-amber-500/5 flex flex-col gap-1.5">
             <div className="flex items-center justify-between">
-              <span className="font-mono font-bold text-amber-400 uppercase tracking-wider text-[11px]">
-                2. Modify SL/TP (&quot;update&quot;)
+              <span className="font-mono font-bold text-amber-400 uppercase text-[11px]">
+                2. &quot;update&quot;
               </span>
-              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300">
-                Live Adjust
+              <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300">
+                /trades
               </span>
             </div>
-            <p className="text-[11px] text-muted leading-relaxed">
-              Updates stop-loss, take-profit, or moves SL to entry breakeven on an open trade.
+            <p className="text-[11px] text-muted leading-snug">
+              Modifies SL, TP, or moves SL to entry breakeven.
             </p>
-            <div className="text-[11px] font-mono flex flex-col gap-1 pt-1 border-t border-amber-500/15">
-              <span>
-                <strong className="text-text">Match By:</strong> <code>trade_id</code> OR <code>symbol</code> (latest active)
-              </span>
-              <span>
-                <strong className="text-text">New Levels:</strong> <code>stop_loss</code>, <code>take_profit</code>
-              </span>
-              <span>
-                <strong className="text-text">1-Flag Breakeven:</strong> <code>&quot;breakeven&quot;: true</code> (sets SL = EP)
-              </span>
-              <span>
-                <strong className="text-text">Other:</strong> <code>margin_usd</code>, <code>leverage</code>, <code>notes</code>
-              </span>
+            <div className="text-[10px] font-mono text-muted pt-1 border-t border-amber-500/15 flex flex-col gap-0.5">
+              <span><b className="text-text">Match:</b> trade_id or symbol</span>
+              <span><b className="text-text">Opt:</b> stop_loss, take_profit, breakeven: true</span>
             </div>
           </div>
 
-          <div className="p-3.5 rounded-xl border border-sky-500/25 bg-sky-500/5 flex flex-col gap-2">
+          <div className="p-3 rounded-xl border border-sky-500/25 bg-sky-500/5 flex flex-col gap-1.5">
             <div className="flex items-center justify-between">
-              <span className="font-mono font-bold text-sky-400 uppercase tracking-wider text-[11px]">
-                3. Close Trade (&quot;close&quot;)
+              <span className="font-mono font-bold text-sky-400 uppercase text-[11px]">
+                3. &quot;close&quot;
               </span>
-              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-sky-500/15 text-sky-300">
-                Logs to Journal
+              <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-sky-500/15 text-sky-300">
+                /trades → /journal
               </span>
             </div>
-            <p className="text-[11px] text-muted leading-relaxed">
-              Closes the active trade, calculates realized PnL ($ &amp; %), and writes to <code className="text-text">/journal</code>.
+            <p className="text-[11px] text-muted leading-snug">
+              Closes active trade, computes PnL &amp; logs to Journal.
             </p>
-            <div className="text-[11px] font-mono flex flex-col gap-1 pt-1 border-t border-sky-500/15">
-              <span>
-                <strong className="text-text">Match By:</strong> <code>trade_id</code> OR <code>symbol</code> (latest active)
+            <div className="text-[10px] font-mono text-muted pt-1 border-t border-sky-500/15 flex flex-col gap-0.5">
+              <span><b className="text-text">Match:</b> trade_id or symbol</span>
+              <span><b className="text-text">Opt:</b> exit_price, closed_reason, close_notes</span>
+            </div>
+          </div>
+
+          <div className="p-3 rounded-xl border border-purple-500/25 bg-purple-500/5 flex flex-col gap-1.5">
+            <div className="flex items-center justify-between">
+              <span className="font-mono font-bold text-purple-400 uppercase text-[11px]">
+                4. &quot;watchlist&quot;
               </span>
-              <span>
-                <strong className="text-text">Auto-Filled:</strong> <code>exit_price</code> (uses live MEXC price if omitted)
+              <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-300">
+                /watchlist
               </span>
-              <span>
-                <strong className="text-text">Reason Tag:</strong> <code>closed_reason</code> (&quot;tp_hit&quot;|&quot;sl_hit&quot;|&quot;manual_close&quot;)
+            </div>
+            <p className="text-[11px] text-muted leading-snug">
+              Arms a pending price-trigger setup on Watchlist.
+            </p>
+            <div className="text-[10px] font-mono text-muted pt-1 border-t border-purple-500/15 flex flex-col gap-0.5">
+              <span><b className="text-text">Req:</b> symbol, side</span>
+              <span><b className="text-text">Opt:</b> trigger_price, entry_price, stop_loss, take_profit</span>
+            </div>
+          </div>
+
+          <div className="p-3 rounded-xl border border-pink-500/25 bg-pink-500/5 flex flex-col gap-1.5">
+            <div className="flex items-center justify-between">
+              <span className="font-mono font-bold text-pink-400 uppercase text-[11px]">
+                5. &quot;journal&quot;
               </span>
-              <span>
-                <strong className="text-text">Review:</strong> <code>close_notes</code> / <code>notes</code>
+              <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-pink-500/15 text-pink-300">
+                /journal
               </span>
+            </div>
+            <p className="text-[11px] text-muted leading-snug">
+              Directly logs a trade into your Trade Journal.
+            </p>
+            <div className="text-[10px] font-mono text-muted pt-1 border-t border-pink-500/15 flex flex-col gap-0.5">
+              <span><b className="text-text">Req:</b> symbol, side</span>
+              <span><b className="text-text">Opt:</b> entry_price, exit_price, margin_usd, leverage, tags, fees</span>
             </div>
           </div>
         </div>
@@ -493,7 +547,7 @@ console.log("MOCHEX Trade ID:", result.trade_id, result);`;
                 <th className="py-2.5 px-3">Aliases</th>
                 <th className="py-2.5 px-3">Type</th>
                 <th className="py-2.5 px-3">Requirement / Default</th>
-                <th className="py-2.5 px-3">Description &amp; Behavior on /trades</th>
+                <th className="py-2.5 px-3">Description &amp; Behavior</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-line/60">
@@ -538,7 +592,10 @@ console.log("MOCHEX Trade ID:", result.trade_id, result);`;
               <span>Interactive Mochbot Payload Builder &amp; Live Tester</span>
             </h3>
             <p className="text-xs text-muted">
-              Configure a trade action below to generate ready-to-paste code or fire a real test trade to your <code className="font-mono text-accent">/trades</code> table.
+              Select an action below to generate ready-to-paste code or fire a real test call into{" "}
+              <code className="font-mono text-accent">/trades</code>,{" "}
+              <code className="font-mono text-accent">/watchlist</code>, or{" "}
+              <code className="font-mono text-accent">/journal</code>.
             </p>
           </div>
 
@@ -549,7 +606,8 @@ console.log("MOCHEX Trade ID:", result.trade_id, result);`;
                 { id: "open", label: "🚀 Open Trade" },
                 { id: "update", label: "🎯 Update SL/TP" },
                 { id: "close", label: "🏁 Close Trade" },
-                { id: "watchlist", label: "📡 Watchlist" },
+                { id: "watchlist", label: "📡 Add Watchlist" },
+                { id: "journal", label: "📓 Add Journal" },
               ] as { id: BotAction; label: string }[]
             ).map((tab) => (
               <button
@@ -581,45 +639,60 @@ console.log("MOCHEX Trade ID:", result.trade_id, result);`;
             />
           </label>
 
+          {(action === "open" || action === "watchlist" || action === "journal") && (
+            <label className="flex flex-col gap-1">
+              <span className="text-[11px] text-muted font-medium">Side / Direction</span>
+              <select
+                value={side}
+                onChange={(e) => setSide(e.target.value as BotSide)}
+                className="hairline bg-panel px-2.5 py-1.5 rounded text-xs outline-none focus:border-accent cursor-pointer"
+              >
+                <option value="long">↗ LONG (buy)</option>
+                <option value="short">↘ SHORT (sell)</option>
+              </select>
+            </label>
+          )}
+
           {(action === "open" || action === "watchlist") && (
-            <>
-              <label className="flex flex-col gap-1">
-                <span className="text-[11px] text-muted font-medium">Side / Direction</span>
-                <select
-                  value={side}
-                  onChange={(e) => setSide(e.target.value as BotSide)}
-                  className="hairline bg-panel px-2.5 py-1.5 rounded text-xs outline-none focus:border-accent cursor-pointer"
-                >
-                  <option value="long">↗ LONG (buy)</option>
-                  <option value="short">↘ SHORT (sell)</option>
-                </select>
-              </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-[11px] text-muted font-medium">Order Type</span>
+              <select
+                value={orderType}
+                onChange={(e) => setOrderType(e.target.value as "market" | "limit")}
+                className="hairline bg-panel px-2.5 py-1.5 rounded text-xs outline-none focus:border-accent cursor-pointer"
+              >
+                <option value="market">Market</option>
+                <option value="limit">Limit</option>
+              </select>
+            </label>
+          )}
 
-              <label className="flex flex-col gap-1">
-                <span className="text-[11px] text-muted font-medium">Order Type</span>
-                <select
-                  value={orderType}
-                  onChange={(e) => setOrderType(e.target.value as "market" | "limit")}
-                  className="hairline bg-panel px-2.5 py-1.5 rounded text-xs outline-none focus:border-accent cursor-pointer"
-                >
-                  <option value="market">Market</option>
-                  <option value="limit">Limit</option>
-                </select>
-              </label>
+          {action === "watchlist" && (
+            <label className="flex flex-col gap-1">
+              <span className="text-[11px] text-muted font-medium">Trigger Price</span>
+              <input
+                type="text"
+                value={triggerPrice}
+                onChange={(e) => setTriggerPrice(e.target.value)}
+                placeholder="184.00"
+                className="hairline bg-panel px-2.5 py-1.5 rounded text-xs font-mono outline-none focus:border-accent"
+              />
+            </label>
+          )}
 
-              <label className="flex flex-col gap-1">
-                <span className="text-[11px] text-muted font-medium">
-                  Entry Price <span className="text-[10px] opacity-75">(blank = live MEXC)</span>
-                </span>
-                <input
-                  type="text"
-                  value={entryPrice}
-                  onChange={(e) => setEntryPrice(e.target.value)}
-                  placeholder="Auto live price if empty"
-                  className="hairline bg-panel px-2.5 py-1.5 rounded text-xs font-mono outline-none focus:border-accent"
-                />
-              </label>
-            </>
+          {(action === "open" || action === "watchlist" || action === "journal") && (
+            <label className="flex flex-col gap-1">
+              <span className="text-[11px] text-muted font-medium">
+                Entry Price <span className="text-[10px] opacity-75">(blank = live MEXC)</span>
+              </span>
+              <input
+                type="text"
+                value={entryPrice}
+                onChange={(e) => setEntryPrice(e.target.value)}
+                placeholder="Auto live price if empty"
+                className="hairline bg-panel px-2.5 py-1.5 rounded text-xs font-mono outline-none focus:border-accent"
+              />
+            </label>
           )}
 
           {(action === "update" || action === "close") && (
@@ -638,33 +711,33 @@ console.log("MOCHEX Trade ID:", result.trade_id, result);`;
           )}
 
           {action !== "close" && (
-            <>
-              <label className="flex flex-col gap-1">
-                <span className="text-[11px] text-muted font-medium">Stop Loss (SL)</span>
-                <input
-                  type="text"
-                  value={stopLoss}
-                  onChange={(e) => setStopLoss(e.target.value)}
-                  disabled={action === "update" && moveToBe}
-                  placeholder="178.00"
-                  className="hairline bg-panel px-2.5 py-1.5 rounded text-xs font-mono outline-none focus:border-accent disabled:opacity-50"
-                />
-              </label>
-
-              <label className="flex flex-col gap-1">
-                <span className="text-[11px] text-muted font-medium">Take Profit (TP)</span>
-                <input
-                  type="text"
-                  value={takeProfit}
-                  onChange={(e) => setTakeProfit(e.target.value)}
-                  placeholder="202.00"
-                  className="hairline bg-panel px-2.5 py-1.5 rounded text-xs font-mono outline-none focus:border-accent"
-                />
-              </label>
-            </>
+            <label className="flex flex-col gap-1">
+              <span className="text-[11px] text-muted font-medium">Stop Loss (SL)</span>
+              <input
+                type="text"
+                value={stopLoss}
+                onChange={(e) => setStopLoss(e.target.value)}
+                disabled={action === "update" && moveToBe}
+                placeholder="178.00"
+                className="hairline bg-panel px-2.5 py-1.5 rounded text-xs font-mono outline-none focus:border-accent disabled:opacity-50"
+              />
+            </label>
           )}
 
-          {action === "open" && (
+          {action !== "close" && action !== "journal" && (
+            <label className="flex flex-col gap-1">
+              <span className="text-[11px] text-muted font-medium">Take Profit (TP)</span>
+              <input
+                type="text"
+                value={takeProfit}
+                onChange={(e) => setTakeProfit(e.target.value)}
+                placeholder="202.00"
+                className="hairline bg-panel px-2.5 py-1.5 rounded text-xs font-mono outline-none focus:border-accent"
+              />
+            </label>
+          )}
+
+          {(action === "open" || action === "journal") && (
             <>
               <label className="flex flex-col gap-1">
                 <span className="text-[11px] text-muted font-medium">Margin (USD)</span>
@@ -704,40 +777,82 @@ console.log("MOCHEX Trade ID:", result.trade_id, result);`;
             </label>
           )}
 
+          {(action === "close" || action === "journal") && (
+            <label className="flex flex-col gap-1">
+              <span className="text-[11px] text-muted font-medium">
+                Exit Price <span className="text-[10px] opacity-75">({action === "journal" ? "blank = open trade" : "blank = live MEXC"})</span>
+              </span>
+              <input
+                type="text"
+                value={exitPrice}
+                onChange={(e) => setExitPrice(e.target.value)}
+                placeholder={action === "journal" ? "198.50 (or blank if open)" : "Auto live price if empty"}
+                className="hairline bg-panel px-2.5 py-1.5 rounded text-xs font-mono outline-none focus:border-accent"
+              />
+            </label>
+          )}
+
           {action === "close" && (
+            <label className="flex flex-col gap-1">
+              <span className="text-[11px] text-muted font-medium">Close Reason</span>
+              <select
+                value={closedReason}
+                onChange={(e) =>
+                  setClosedReason(e.target.value as "tp_hit" | "sl_hit" | "manual_close")
+                }
+                className="hairline bg-panel px-2.5 py-1.5 rounded text-xs outline-none focus:border-accent cursor-pointer"
+              >
+                <option value="tp_hit">🎯 Take Profit Hit (tp_hit)</option>
+                <option value="sl_hit">🛑 Stop Loss Hit (sl_hit)</option>
+                <option value="manual_close">✋ Manual / Bot Close (manual_close)</option>
+              </select>
+            </label>
+          )}
+
+          {action === "journal" && (
             <>
               <label className="flex flex-col gap-1">
-                <span className="text-[11px] text-muted font-medium">
-                  Exit Price <span className="text-[10px] opacity-75">(blank = live MEXC)</span>
-                </span>
+                <span className="text-[11px] text-muted font-medium">Tags (comma-separated)</span>
                 <input
                   type="text"
-                  value={exitPrice}
-                  onChange={(e) => setExitPrice(e.target.value)}
-                  placeholder="Auto live price if empty"
+                  value={tagsInput}
+                  onChange={(e) => setTagsInput(e.target.value)}
+                  placeholder="Mochbot, Momentum"
                   className="hairline bg-panel px-2.5 py-1.5 rounded text-xs font-mono outline-none focus:border-accent"
                 />
               </label>
 
               <label className="flex flex-col gap-1">
-                <span className="text-[11px] text-muted font-medium">Close Reason</span>
+                <span className="text-[11px] text-muted font-medium">Fees (USD)</span>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={feesInput}
+                  onChange={(e) => setFeesInput(e.target.value)}
+                  placeholder="0.80"
+                  className="hairline bg-panel px-2.5 py-1.5 rounded text-xs font-mono outline-none focus:border-accent"
+                />
+              </label>
+
+              <label className="flex flex-col gap-1">
+                <span className="text-[11px] text-muted font-medium">Discipline Score (1–5)</span>
                 <select
-                  value={closedReason}
-                  onChange={(e) =>
-                    setClosedReason(e.target.value as "tp_hit" | "sl_hit" | "manual_close")
-                  }
-                  className="hairline bg-panel px-2.5 py-1.5 rounded text-xs outline-none focus:border-accent cursor-pointer"
+                  value={disciplineScore}
+                  onChange={(e) => setDisciplineScore(e.target.value)}
+                  className="hairline bg-panel px-2.5 py-1.5 rounded text-xs font-mono outline-none focus:border-accent cursor-pointer"
                 >
-                  <option value="tp_hit">🎯 Take Profit Hit (tp_hit)</option>
-                  <option value="sl_hit">🛑 Stop Loss Hit (sl_hit)</option>
-                  <option value="manual_close">✋ Manual / Bot Close (manual_close)</option>
+                  <option value="5">5 ★ — Flawless Execution</option>
+                  <option value="4">4 ★ — Solid Execution</option>
+                  <option value="3">3 ★ — Average</option>
+                  <option value="2">2 ★ — Suboptimal</option>
+                  <option value="1">1 ★ — Rule Violation</option>
                 </select>
               </label>
             </>
           )}
 
           <label className="flex flex-col gap-1 sm:col-span-2">
-            <span className="text-[11px] text-muted font-medium">Notes / Bot Signal Name</span>
+            <span className="text-[11px] text-muted font-medium">Notes / Thesis / Review</span>
             <input
               type="text"
               value={notes}
@@ -804,7 +919,7 @@ console.log("MOCHEX Trade ID:", result.trade_id, result);`;
                 <span>⚡</span>
                 <span>
                   {testing
-                    ? "Sending to /trades…"
+                    ? "Sending…"
                     : `Test '${action.toUpperCase()}' Now`}
                 </span>
               </button>
